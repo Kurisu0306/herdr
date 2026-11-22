@@ -23,6 +23,25 @@
 
 ---
 
+## 关于这个 fork
+
+这是 [herdrdev/herdr](https://github.com/herdrdev/herdr) 的一个非官方个人 fork，主要改造了 Agents 面板。它与 Herdr 维护者无关，也不受其支持；官方项目、发布版本和文档请以上游仓库为准。
+
+<p align="center">
+  <img src="assets/fork-agents-panel.png" alt="这个 fork 的 Agents 面板：按工作区分组、折叠一个工作区、用标签筛选" width="820" />
+</p>
+
+- **按工作区筛选** — Agents 标题下有一排标签，点击后只列出该工作区的 agent。工作区处于 blocked 或 done 状态时，它的标签显示对应的状态颜色。
+- **分组与折叠** — `grouped` 排序下每个工作区的 agent 上方有小标题，可以从小标题折叠该工作区。
+- **同名工作区合并** — 在同一目录下打开的工作区共用一个标签和一个小标题。
+- **状态时长** — 每行末尾显示 agent 进入当前状态已有多久，服务器重启后保留。
+- **agent 图标** — 行标记 `agent_icon` 用符号标明这一行是哪个 agent。
+- **可选的树形布局** — `ui.sidebar.layout = "tree"` 让每个工作区只出现一次，agent 列在它下面。
+
+图片由演示会话的终端输出渲染而成。详细说明见[暂存的配置文档](docs/next/website/src/content/docs/zh-cn/configuration.mdx)。
+
+---
+
 https://github.com/user-attachments/assets/043ec09f-4bdd-41d5-aee0-8fda6b83e267
 
 **智能体复用器，住在你的终端里。**

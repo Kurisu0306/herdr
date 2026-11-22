@@ -24,6 +24,25 @@
 
 ---
 
+## this fork
+
+an unofficial personal fork of [herdrdev/herdr](https://github.com/herdrdev/herdr) that reworks the Agents panel. it is not affiliated with or supported by the Herdr maintainers; for the official project, releases, and docs, use the upstream repository.
+
+<p align="center">
+  <img src="assets/fork-agents-panel.png" alt="the fork's agents panel grouped by space, with one space folded, and filtered by a chip" width="820" />
+</p>
+
+- **filter by space** — a row of chips under the Agents title; click one to list only that space's agents. a chip takes its space's state color while that space is blocked or done.
+- **grouped and foldable** — the `grouped` order names each space above its agents, and a space folds from its header.
+- **same-named spaces are one group** — spaces opened on the same directory share a chip and a header.
+- **state ages** — each row ends with how long the agent has been in its current state, kept across server restarts.
+- **agent icons** — the `agent_icon` row token marks which agent a row belongs to.
+- **optional tree layout** — `ui.sidebar.layout = "tree"` lists every space once with its agents beneath it.
+
+the image is rendered from the terminal output of a demo session. details are in the [staged configuration docs](docs/next/website/src/content/docs/configuration.mdx).
+
+---
+
 https://github.com/user-attachments/assets/043ec09f-4bdd-41d5-aee0-8fda6b83e267
 
 **the runtime your coding agents live on.**
