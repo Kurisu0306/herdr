@@ -61,12 +61,22 @@ pub(super) fn render_expanded(
     ) {
         return;
     }
+    let filter = super::agent_filter::live_filter(config.agent_panel_filter.as_ref(), endpoints);
+    let list_offset = super::agent_filter::render_chips(
+        buffer,
+        area,
+        || super::agent_filter::endpoint_chips(endpoints, filter),
+        filter,
+        config,
+        hits,
+    );
     let rows = agent_rows(endpoints, active_endpoint_id, config);
     super::agent_sidebar::render_agent_list(
         buffer,
         area,
+        list_offset,
         &rows,
-        agent_view_label.map(|_| " no matching agents"),
+        (agent_view_label.is_some() || filter.is_some()).then_some(" no matching agents"),
         config,
         agent_scroll,
         hits,
@@ -160,6 +170,7 @@ fn agent_rows(
         endpoints,
         active_endpoint_id,
         config.agent_panel_sort,
+        config.agent_panel_filter.as_ref(),
     )
     .into_iter()
     .filter_map(|row| {

@@ -176,6 +176,9 @@ impl ClientShellState {
                     self.push_endpoint_method(method, outcome);
                     return;
                 }
+                if self.agent_action_stays_in_filtered_list(action) {
+                    return;
+                }
                 outcome.actions.push(ClientShellAction::Keybind(action));
             }
             crate::input::KeybindMatch::Command(command) => {
@@ -857,6 +860,21 @@ impl ClientShellState {
         (repaint, Vec::new())
     }
 
+    /// The server orders agents without the client-local space filter, so an agent action the
+    /// filtered list cannot resolve must not fall through to the server's unfiltered list.
+    fn agent_action_stays_in_filtered_list(&self, action: crate::input::KeybindAction) -> bool {
+        use crate::input::KeybindAction;
+
+        matches!(
+            action,
+            KeybindAction::FocusAgent(_) | KeybindAction::PreviousAgent | KeybindAction::NextAgent
+        ) && self.snapshot.as_deref().is_some_and(|snapshot| {
+            self.config
+                .agent_filter_workspace(&self.active_endpoint_id, snapshot)
+                .is_some()
+        })
+    }
+
     pub(super) fn endpoint_method_for_action(
         &mut self,
         action: crate::input::KeybindAction,
@@ -893,6 +911,8 @@ impl ClientShellState {
                 let agents = super::agent_sidebar::ordered_agent_pane_ids(
                     snapshot,
                     self.config.agent_panel_sort,
+                    self.config
+                        .agent_filter_workspace(&self.active_endpoint_id, snapshot),
                 );
                 Some(Method::PaneFocus(PaneTarget {
                     pane_id: agents.get(index)?.clone(),
@@ -902,6 +922,8 @@ impl ClientShellState {
                 let agents = super::agent_sidebar::ordered_agent_pane_ids(
                     snapshot,
                     self.config.agent_panel_sort,
+                    self.config
+                        .agent_filter_workspace(&self.active_endpoint_id, snapshot),
                 );
                 if agents.is_empty() {
                     return None;

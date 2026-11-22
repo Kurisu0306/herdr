@@ -614,8 +614,12 @@ fn mobile_items(
         endpoints,
         active_endpoint_id,
         config.agent_panel_sort,
+        config.agent_panel_filter.as_ref(),
     );
-    let agent_view_label = snapshot.agent_view_label.as_deref();
+    // The switcher has no chip strip, so name the space a filter chosen in the sidebar keeps.
+    let agent_view_label = snapshot.agent_view_label.as_deref().or_else(|| {
+        super::agent_filter::live_filter_label(config.agent_panel_filter.as_ref(), endpoints)
+    });
     if !agents.is_empty() || agent_view_label.is_some() {
         let title = agent_view_label
             .map(|label| format!("agents · {label}"))

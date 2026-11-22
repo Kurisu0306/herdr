@@ -2022,6 +2022,23 @@ impl ClientShellState {
                     }
                     return;
                 }
+                if let Some((_, target)) = self
+                    .hits
+                    .agent_filter_chips
+                    .iter()
+                    .find(|(rect, _)| super::contains(*rect, point))
+                {
+                    // Clicking the selected space again returns to every space.
+                    let filter = target
+                        .clone()
+                        .filter(|target| self.config.agent_panel_filter.as_ref() != Some(target));
+                    if filter != self.config.agent_panel_filter {
+                        self.config.agent_panel_filter = filter;
+                        self.agent_scroll = 0;
+                        outcome.repaint = true;
+                    }
+                    return;
+                }
                 if super::contains(self.hits.agent_sort_toggle, point) {
                     let sort = match self.config.agent_panel_sort {
                         crate::config::AgentPanelSortConfig::Spaces => {

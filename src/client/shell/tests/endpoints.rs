@@ -711,6 +711,7 @@ fn agent_navigation_keeps_scroll_when_target_is_visible() {
         &state.endpoints,
         &state.active_endpoint_id,
         state.config.agent_panel_sort,
+        None,
     );
     let index = targets
         .iter()
@@ -1904,6 +1905,7 @@ fn selected_position_sort_uses_public_tab_and_pane_numbers() {
         &state.endpoints,
         &state.active_endpoint_id,
         crate::config::AgentPanelSortConfig::Priority,
+        None,
     )
     .into_iter()
     .map(|row| row.agent.name.as_deref().expect("agent name"))
@@ -2890,6 +2892,68 @@ fn focus_agent_index_uses_online_aggregate_rows() {
 
     state.set_endpoint_status(&endpoint_id, ClientEndpointStatus::Reconnecting);
     assert!(!state.indexed_navigation_target_exists(&focus_agent(0)));
+}
+
+#[test]
+fn space_chip_filters_agents_to_one_machine_space() {
+    use crate::api::schema::AgentStatus;
+
+    let (mut state, remote) = state_with_remote();
+    for (endpoint_id, name) in [
+        (ClientEndpointId::Local, "local agent"),
+        (remote.clone(), "remote agent"),
+    ] {
+        let mut projection = state
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+            .expect("endpoint")
+            .snapshot
+            .clone()
+            .expect("endpoint snapshot");
+        projection.agents = vec![agent(name, AgentStatus::Idle, 1)];
+        state.set_endpoint_snapshot(&endpoint_id, projection);
+    }
+    state.compose(100, 28).expect("aggregate sidebar");
+    assert_eq!(state.hits.endpoint_agents.len(), 2);
+    // Both machines use workspace `ws_1`; the chip must keep them apart.
+    let chip = state
+        .hits
+        .agent_filter_chips
+        .iter()
+        .find(|(_, target)| {
+            target
+                .as_ref()
+                .is_some_and(|target| target.endpoint_id == remote)
+        })
+        .map(|(rect, _)| *rect)
+        .expect("remote space chip");
+
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: chip.x,
+        row: chip.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    state.compose(100, 28).expect("filtered aggregate sidebar");
+
+    assert_eq!(
+        state
+            .hits
+            .endpoint_agents
+            .iter()
+            .map(|(_, endpoint_id, _)| endpoint_id)
+            .collect::<Vec<_>>(),
+        [&remote]
+    );
+    let targets = super::super::aggregate_navigation::online_agent_targets(
+        &state.endpoints,
+        &state.active_endpoint_id,
+        state.config.agent_panel_sort,
+        state.config.agent_panel_filter.as_ref(),
+    );
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].endpoint_id, remote);
 }
 
 #[test]

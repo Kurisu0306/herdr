@@ -47,6 +47,7 @@ pub(in crate::client::shell) fn collapsed_sidebar_sections(
 pub(crate) fn render_collapsed_sidebar(
     buffer: &mut Buffer,
     area: Rect,
+    endpoint_id: &ClientEndpointId,
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     selected_workspace_id: Option<&str>,
@@ -127,10 +128,14 @@ pub(crate) fn render_collapsed_sidebar(
         detail_area.width,
         detail_area.height.saturating_sub(1),
     );
-    for (index, pane_id) in super::ordered_agent_pane_ids(snapshot, config.agent_panel_sort)
-        .into_iter()
-        .take(detail_content.height as usize)
-        .enumerate()
+    for (index, pane_id) in super::ordered_agent_pane_ids(
+        snapshot,
+        config.agent_panel_sort,
+        config.agent_filter_workspace(endpoint_id, snapshot),
+    )
+    .into_iter()
+    .take(detail_content.height as usize)
+    .enumerate()
     {
         let Some(agent) = snapshot
             .agents
@@ -433,6 +438,7 @@ pub(crate) fn render_sidebar(
     super::render_agent_panel(
         buffer,
         detail_area,
+        state.active_endpoint_id,
         snapshot,
         config,
         state.agent_scroll,
@@ -660,13 +666,12 @@ pub(in crate::client::shell) fn displayed_workspace_status(
         .unwrap_or(workspace.agent_status)
 }
 
-pub(in crate::client::shell) fn workspace_rows(
+/// Name a space is listed under: linked worktrees show their branch unless renamed.
+pub(in crate::client::shell) fn workspace_display_label(
     workspace: &ClientShellWorkspace,
-    status: crate::api::schema::AgentStatus,
     indented: bool,
-    config: &SpacesSidebarConfig,
-) -> Vec<Vec<crate::ui::ResolvedToken>> {
-    let label = if indented && !workspace.custom_label {
+) -> &str {
+    if indented && !workspace.custom_label {
         workspace
             .branch
             .as_deref()
@@ -674,7 +679,16 @@ pub(in crate::client::shell) fn workspace_rows(
             .unwrap_or(&workspace.label)
     } else {
         &workspace.label
-    };
+    }
+}
+
+pub(in crate::client::shell) fn workspace_rows(
+    workspace: &ClientShellWorkspace,
+    status: crate::api::schema::AgentStatus,
+    indented: bool,
+    config: &SpacesSidebarConfig,
+) -> Vec<Vec<crate::ui::ResolvedToken>> {
+    let label = workspace_display_label(workspace, indented);
     let token_values = workspace.tokens.iter().cloned().collect::<HashMap<_, _>>();
     crate::ui::sidebar_space_rows(
         config,

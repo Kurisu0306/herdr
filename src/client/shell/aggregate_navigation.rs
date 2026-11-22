@@ -57,7 +57,17 @@ pub(super) fn aggregate_agent_rows<'a>(
     endpoints: &'a [ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
     sort: crate::config::AgentPanelSortConfig,
+    filter: Option<&super::agent_filter::AgentPanelFilter>,
 ) -> Vec<AggregateAgentRow<'a>> {
+    let filter = super::agent_filter::live_filter(filter, endpoints);
+    let keep_filtered = |rows: &mut Vec<AggregateAgentRow<'a>>| {
+        if let Some(filter) = filter {
+            rows.retain(|row| {
+                row.endpoint.endpoint_id == &filter.endpoint_id
+                    && row.agent.workspace_id == filter.workspace_id
+            });
+        }
+    };
     let active_index = endpoints
         .iter()
         .position(|endpoint| &endpoint.endpoint_id == active_endpoint_id);
@@ -98,6 +108,7 @@ pub(super) fn aggregate_agent_rows<'a>(
                     })
             })
             .collect::<Vec<_>>();
+        keep_filtered(&mut rows);
         if let Some(view) = view {
             let context = active_index
                 .and_then(|index| endpoints[index].snapshot.as_deref())
@@ -132,7 +143,7 @@ pub(super) fn aggregate_agent_rows<'a>(
 
     let mut rows = cached_endpoint_snapshots(endpoints)
         .flat_map(|endpoint| {
-            super::agent_sidebar::ordered_agent_pane_ids(endpoint.snapshot, sort)
+            super::agent_sidebar::ordered_agent_pane_ids(endpoint.snapshot, sort, None)
                 .into_iter()
                 .filter_map(move |pane_id| {
                     let agent = endpoint
@@ -152,6 +163,7 @@ pub(super) fn aggregate_agent_rows<'a>(
                 })
         })
         .collect::<Vec<_>>();
+    keep_filtered(&mut rows);
     sort_aggregate_rows(&mut rows, sort);
     rows
 }
@@ -264,8 +276,9 @@ pub(super) fn online_agent_targets(
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
     sort: crate::config::AgentPanelSortConfig,
+    filter: Option<&super::agent_filter::AgentPanelFilter>,
 ) -> Vec<AggregateAgentTarget> {
-    aggregate_agent_rows(endpoints, active_endpoint_id, sort)
+    aggregate_agent_rows(endpoints, active_endpoint_id, sort, filter)
         .into_iter()
         .filter(|row| !row.endpoint.stale())
         .map(|row| AggregateAgentTarget {

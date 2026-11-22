@@ -17,10 +17,15 @@ pub(super) struct AgentRow {
     pub(super) rows: Vec<Vec<crate::ui::ResolvedToken>>,
 }
 
+/// Agent panes in panel order, optionally narrowed to one workspace of `snapshot`.
 pub(super) fn ordered_agent_pane_ids(
     snapshot: &ClientShellSnapshot,
     sort: crate::config::AgentPanelSortConfig,
+    workspace_id: Option<&str>,
 ) -> Vec<String> {
+    let kept = |agent: &&crate::protocol::ClientShellAgent| {
+        workspace_id.is_none_or(|workspace_id| agent.workspace_id == workspace_id)
+    };
     if snapshot.agent_view_label.is_some() {
         return snapshot
             .agent_order
@@ -29,12 +34,13 @@ pub(super) fn ordered_agent_pane_ids(
                 snapshot
                     .agents
                     .iter()
+                    .filter(kept)
                     .any(|agent| agent.pane_id == pane_id.as_str())
             })
             .cloned()
             .collect();
     }
-    let mut agents = snapshot.agents.iter().collect::<Vec<_>>();
+    let mut agents = snapshot.agents.iter().filter(kept).collect::<Vec<_>>();
     if sort == crate::config::AgentPanelSortConfig::Priority {
         agents.sort_by_key(|agent| {
             (
@@ -52,6 +58,7 @@ pub(super) fn ordered_agent_pane_ids(
 pub(super) fn render_agent_panel(
     buffer: &mut Buffer,
     area: Rect,
+    endpoint_id: &ClientEndpointId,
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
@@ -67,15 +74,29 @@ pub(super) fn render_agent_panel(
         return;
     }
 
-    let rows = agent_rows(snapshot, config, None);
+    let filter = config
+        .agent_panel_filter
+        .as_ref()
+        .filter(|filter| filter.workspace_in(endpoint_id, snapshot).is_some());
+    let list_offset = super::agent_filter::render_chips(
+        buffer,
+        area,
+        || super::agent_filter::snapshot_chips(endpoint_id, snapshot, filter),
+        filter,
+        config,
+        hits,
+    );
+    let rows = agent_rows(
+        snapshot,
+        config,
+        filter.map(|filter| filter.workspace_id.as_str()),
+    );
     render_agent_list(
         buffer,
         area,
+        list_offset,
         &rows,
-        snapshot
-            .agent_view_label
-            .as_ref()
-            .map(|_| " no matching agents"),
+        (snapshot.agent_view_label.is_some() || filter.is_some()).then_some(" no matching agents"),
         config,
         agent_scroll,
         hits,
@@ -154,6 +175,7 @@ pub(super) fn render_agent_panel_header(
 pub(super) fn render_agent_list<T>(
     buffer: &mut Buffer,
     area: Rect,
+    list_offset: u16,
     rows: &[T],
     empty_message: Option<&str>,
     config: &ClientShellConfig,
@@ -164,9 +186,9 @@ pub(super) fn render_agent_list<T>(
 ) {
     let body = Rect::new(
         area.x,
-        area.y.saturating_add(3),
+        area.y.saturating_add(list_offset),
         area.width,
-        area.height.saturating_sub(3),
+        area.height.saturating_sub(list_offset),
     );
     hits.agent_body = body;
     if body.is_empty() || rows.is_empty() {
@@ -234,14 +256,14 @@ pub(super) fn render_agent_list<T>(
     }
 }
 
-pub(super) fn agent_rows(
+fn agent_rows(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
-    machine: Option<&str>,
+    workspace_id: Option<&str>,
 ) -> Vec<AgentRow> {
-    ordered_agent_pane_ids(snapshot, config.agent_panel_sort)
+    ordered_agent_pane_ids(snapshot, config.agent_panel_sort, workspace_id)
         .into_iter()
-        .filter_map(|pane_id| agent_row(snapshot, &pane_id, config, machine))
+        .filter_map(|pane_id| agent_row(snapshot, &pane_id, config, None))
         .collect()
 }
 

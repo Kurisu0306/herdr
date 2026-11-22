@@ -994,6 +994,7 @@ impl ClientShellState {
                     &self.endpoints,
                     &self.active_endpoint_id,
                     self.config.agent_panel_sort,
+                    self.config.agent_panel_filter.as_ref(),
                 )
                 .get(*index)
                 .is_some()
