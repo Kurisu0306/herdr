@@ -12,9 +12,21 @@ use super::*;
 
 pub(super) struct AgentRow {
     pub(super) pane_id: String,
+    pub(super) workspace_id: String,
     pub(super) status: crate::api::schema::AgentStatus,
     pub(super) focused: bool,
     pub(super) rows: Vec<Vec<crate::ui::ResolvedToken>>,
+}
+
+impl AgentRow {
+    /// Drops rows that only repeat the space name, for lists where a group header or the
+    /// selected chip already names the space.
+    pub(super) fn drop_space_only_rows(&mut self) {
+        self.rows.retain(|row| {
+            !row.iter()
+                .all(|token| matches!(token.kind, crate::ui::ResolvedTokenKind::Workspace(_)))
+        });
+    }
 }
 
 /// Agent panes in panel order, optionally narrowed to one workspace of `snapshot`.
@@ -86,16 +98,27 @@ pub(super) fn render_agent_panel(
         config,
         hits,
     );
-    let rows = agent_rows(
+    let mut rows = agent_rows(
         snapshot,
         config,
         filter.map(|filter| filter.workspace_id.as_str()),
     );
+    let headers = if filter.is_none()
+        && super::agent_groups::grouped_order(config, snapshot.agent_view_label.as_deref())
+    {
+        space_headers(endpoint_id, snapshot, &rows)
+    } else {
+        Vec::new()
+    };
+    if filter.is_some() || !headers.is_empty() {
+        rows.iter_mut().for_each(AgentRow::drop_space_only_rows);
+    }
     render_agent_list(
         buffer,
         area,
         list_offset,
         &rows,
+        &headers,
         (snapshot.agent_view_label.is_some() || filter.is_some()).then_some(" no matching agents"),
         config,
         agent_scroll,
@@ -177,6 +200,7 @@ pub(super) fn render_agent_list<T>(
     area: Rect,
     list_offset: u16,
     rows: &[T],
+    headers: &[Option<super::agent_groups::AgentGroupHeader>],
     empty_message: Option<&str>,
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
@@ -208,21 +232,11 @@ pub(super) fn render_agent_list<T>(
         return;
     }
 
-    let row_heights = rows
-        .iter()
-        .map(|row| row_lines(row).max(1).min(u16::MAX as usize) as u16)
-        .collect::<Vec<_>>();
-    let gaps = rows
-        .iter()
-        .enumerate()
-        .map(|(index, _)| {
-            if index + 1 < rows.len() {
-                config.agents.row_gap
-            } else {
-                0
-            }
-        })
-        .collect::<Vec<_>>();
+    let (row_heights, gaps) = super::agent_groups::list_layout(
+        rows.iter().map(&row_lines),
+        headers,
+        config.agents.row_gap,
+    );
     let metrics =
         super::scroll::list_scroll_metrics(&row_heights, &gaps, body.height, *agent_scroll);
     hits.agent_max_scroll = metrics.max_offset_from_bottom;
@@ -238,15 +252,27 @@ pub(super) fn render_agent_list<T>(
         if y.saturating_add(height) > body.bottom() {
             break;
         }
-        let rect = Rect::new(body.x, y, content_width, height);
+        let header = headers.get(index).and_then(Option::as_ref);
+        let header_rows = u16::from(header.is_some()).min(height.saturating_sub(1));
+        if let Some(header) = header.filter(|_| header_rows > 0) {
+            let rect = Rect::new(body.x, y, content_width, 1);
+            put_text(
+                buffer,
+                rect.x.saturating_add(1),
+                rect.y,
+                rect.width.saturating_sub(1),
+                &header.label,
+                Style::default()
+                    .fg(config.palette.overlay0)
+                    .add_modifier(Modifier::BOLD),
+            );
+            if config.mouse_capture {
+                hits.agent_group_headers.push((rect, header.target.clone()));
+            }
+        }
+        let rect = Rect::new(body.x, y + header_rows, content_width, height - header_rows);
         render_row(buffer, rect, row, hits);
-        y = y
-            .saturating_add(height)
-            .saturating_add(if index + 1 < rows.len() {
-                config.agents.row_gap
-            } else {
-                0
-            });
+        y = y.saturating_add(height).saturating_add(gaps[index]);
     }
 
     if show_scrollbar {
@@ -254,6 +280,35 @@ pub(super) fn render_agent_list<T>(
         hits.agent_scrollbar = track;
         super::scroll::render_list_scrollbar(buffer, track, metrics, &config.palette);
     }
+}
+
+/// Headers for the spaces a single machine's rows run through, named as the Spaces panel does.
+fn space_headers(
+    endpoint_id: &ClientEndpointId,
+    snapshot: &ClientShellSnapshot,
+    rows: &[AgentRow],
+) -> Vec<Option<super::agent_groups::AgentGroupHeader>> {
+    let starts = super::agent_groups::group_starts(rows.iter().map(|row| &row.workspace_id));
+    if starts.is_empty() {
+        return Vec::new();
+    }
+    let labels = super::agent_filter::space_labels(snapshot);
+    rows.iter()
+        .zip(starts)
+        .map(|(row, start)| {
+            start.then(|| super::agent_groups::AgentGroupHeader {
+                label: labels
+                    .iter()
+                    .find(|(workspace, _)| workspace.workspace_id == row.workspace_id)
+                    .map_or(row.workspace_id.as_str(), |(_, label)| label)
+                    .to_owned(),
+                target: super::agent_filter::AgentPanelFilter {
+                    endpoint_id: endpoint_id.clone(),
+                    workspace_id: row.workspace_id.clone(),
+                },
+            })
+        })
+        .collect()
 }
 
 fn agent_rows(
@@ -334,6 +389,7 @@ pub(super) fn agent_row(
     );
     Some(AgentRow {
         pane_id: agent.pane_id.clone(),
+        workspace_id: agent.workspace_id.clone(),
         status: agent.agent_status,
         focused: agent.focused,
         rows,

@@ -104,6 +104,8 @@ pub(super) struct ShellHitMap {
     pub(super) agent_sort_toggle: Rect,
     /// Space chips under the Agents title; `None` is the leading `all` chip.
     pub(super) agent_filter_chips: Vec<(Rect, Option<super::agent_filter::AgentPanelFilter>)>,
+    /// Space headers inside the grouped Agents list; clicking one selects its space.
+    pub(super) agent_group_headers: Vec<(Rect, super::agent_filter::AgentPanelFilter)>,
     pub(super) sidebar_divider: Rect,
     pub(super) sidebar_section_divider: Rect,
     pub(super) sidebar_toggle: Rect,

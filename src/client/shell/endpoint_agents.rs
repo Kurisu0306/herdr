@@ -70,12 +70,13 @@ pub(super) fn render_expanded(
         config,
         hits,
     );
-    let rows = agent_rows(endpoints, active_endpoint_id, config);
+    let (rows, headers) = agent_list(endpoints, active_endpoint_id, config, agent_view_label);
     super::agent_sidebar::render_agent_list(
         buffer,
         area,
         list_offset,
         &rows,
+        &headers,
         (agent_view_label.is_some() || filter.is_some()).then_some(" no matching agents"),
         config,
         agent_scroll,
@@ -107,21 +108,25 @@ impl ClientShellState {
         if body_height == 0 {
             return;
         }
-        let rows = agent_rows(&self.endpoints, &self.active_endpoint_id, &self.config);
+        let (rows, headers) = agent_list(
+            &self.endpoints,
+            &self.active_endpoint_id,
+            &self.config,
+            self.snapshot
+                .as_deref()
+                .and_then(|snapshot| snapshot.agent_view_label.as_deref()),
+        );
         let Some(target) = rows
             .iter()
             .position(|row| &row.endpoint_id == endpoint_id && row.agent.pane_id == pane_id)
         else {
             return;
         };
-        let heights = rows
-            .iter()
-            .map(|row| row.agent.rows.len().max(1).min(u16::MAX as usize) as u16)
-            .collect::<Vec<_>>();
-        let mut gaps = vec![self.config.agents.row_gap; rows.len()];
-        if let Some(last) = gaps.last_mut() {
-            *last = 0;
-        }
+        let (heights, gaps) = super::agent_groups::list_layout(
+            rows.iter().map(|row| row.agent.rows.len()),
+            &headers,
+            self.config.agents.row_gap,
+        );
         self.agent_scroll = super::scroll::list_scroll_start_to_reveal(
             &heights,
             &gaps,
@@ -137,6 +142,62 @@ struct EndpointAgentRow {
     machine_label: String,
     stale: bool,
     agent: super::agent_sidebar::AgentRow,
+}
+
+/// Rows of the expanded list with the space headers they are drawn under. Rendering and reveal
+/// both use this, so scroll positions are computed from the geometry that is drawn.
+fn agent_list(
+    endpoints: &[ClientShellEndpoint],
+    active_endpoint_id: &ClientEndpointId,
+    config: &ClientShellConfig,
+    agent_view_label: Option<&str>,
+) -> (
+    Vec<EndpointAgentRow>,
+    Vec<Option<super::agent_groups::AgentGroupHeader>>,
+) {
+    let mut rows = agent_rows(endpoints, active_endpoint_id, config);
+    let filtered =
+        super::agent_filter::live_filter(config.agent_panel_filter.as_ref(), endpoints).is_some();
+    let starts = if !filtered && super::agent_groups::grouped_order(config, agent_view_label) {
+        super::agent_groups::group_starts(
+            rows.iter()
+                .map(|row| (&row.endpoint_id, &row.agent.workspace_id)),
+        )
+    } else {
+        Vec::new()
+    };
+    let headers = rows
+        .iter()
+        .zip(starts)
+        .map(|(row, start)| {
+            start.then(|| {
+                let space = endpoints
+                    .iter()
+                    .find(|endpoint| endpoint.endpoint_id == row.endpoint_id)
+                    .and_then(|endpoint| endpoint.snapshot.as_deref())
+                    .and_then(|snapshot| {
+                        super::agent_filter::space_labels(snapshot)
+                            .into_iter()
+                            .find(|(workspace, _)| workspace.workspace_id == row.agent.workspace_id)
+                            .map(|(_, label)| label)
+                    })
+                    .unwrap_or(&row.agent.workspace_id);
+                super::agent_groups::AgentGroupHeader {
+                    // Spaces on different machines can share a name.
+                    label: format!("{} · {space}", row.machine_label),
+                    target: super::agent_filter::AgentPanelFilter {
+                        endpoint_id: row.endpoint_id.clone(),
+                        workspace_id: row.agent.workspace_id.clone(),
+                    },
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    if filtered || !headers.is_empty() {
+        rows.iter_mut()
+            .for_each(|row| row.agent.drop_space_only_rows());
+    }
+    (rows, headers)
 }
 
 fn agent_rows(

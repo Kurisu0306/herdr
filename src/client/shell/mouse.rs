@@ -2022,15 +2022,22 @@ impl ClientShellState {
                     }
                     return;
                 }
-                if let Some((_, target)) = self
+                let space_choice = self
                     .hits
                     .agent_filter_chips
                     .iter()
                     .find(|(rect, _)| super::contains(*rect, point))
-                {
+                    .map(|(_, target)| target.clone())
+                    .or_else(|| {
+                        self.hits
+                            .agent_group_headers
+                            .iter()
+                            .find(|(rect, _)| super::contains(*rect, point))
+                            .map(|(_, target)| Some(target.clone()))
+                    });
+                if let Some(target) = space_choice {
                     // Clicking the selected space again returns to every space.
                     let filter = target
-                        .clone()
                         .filter(|target| self.config.agent_panel_filter.as_ref() != Some(target));
                     if filter != self.config.agent_panel_filter {
                         self.config.agent_panel_filter = filter;

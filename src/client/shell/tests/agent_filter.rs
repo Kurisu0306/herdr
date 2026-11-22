@@ -244,3 +244,131 @@ fn selected_space_without_agents_keeps_its_chip_and_explains_the_empty_list() {
 
     assert_eq!(listed_agents(&state), ["pane_1"]);
 }
+
+fn header_rect(state: &ClientShellState, workspace_id: &str) -> Rect {
+    state
+        .hits
+        .agent_group_headers
+        .iter()
+        .find(|(_, target)| target.workspace_id == workspace_id)
+        .map(|(rect, _)| *rect)
+        .expect("space header")
+}
+
+fn agent_rect(state: &ClientShellState, pane_id: &str) -> Rect {
+    state
+        .hits
+        .agents
+        .iter()
+        .find(|(_, listed)| listed == pane_id)
+        .map(|(rect, _)| *rect)
+        .expect("agent row")
+}
+
+fn composed(config: &Config, projected: ClientShellSnapshot) -> ClientShellState {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(config));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    state.compose(106, 30).expect("agent sidebar frame");
+    state
+}
+
+#[test]
+fn grouped_list_names_each_space_above_its_agents() {
+    let mut state = two_space_state();
+    let frame = state.compose(106, 30).expect("agent sidebar frame");
+    let rows = frame_rows(&frame);
+
+    let first = header_rect(&state, "ws_1");
+    let second = header_rect(&state, "ws_2");
+    assert_eq!(state.hits.agent_group_headers.len(), 2);
+    assert!(rows[first.y as usize].contains(" client-shell"));
+    assert!(rows[second.y as usize].contains(" second"));
+    assert_eq!(agent_rect(&state, "pane_1").y, first.y + 1);
+    assert_eq!(agent_rect(&state, "pane_2").y, second.y + 1);
+    // A blank row separates one space's agents from the next header.
+    assert_eq!(second.y, agent_rect(&state, "pane_1").bottom() + 1);
+}
+
+#[test]
+fn clicking_a_space_header_selects_that_space() {
+    let mut state = two_space_state();
+    let header = header_rect(&state, "ws_2");
+
+    let outcome = click(&mut state, header);
+
+    assert!(outcome.actions.is_empty() && outcome.requests.is_empty());
+    assert_eq!(listed_agents(&state), ["pane_2"]);
+    // The selected chip names the space now, so the list needs no header.
+    assert!(state.hits.agent_group_headers.is_empty());
+}
+
+#[test]
+fn interleaved_orders_keep_the_flat_list() {
+    let mut priority = Config::default();
+    priority.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
+    assert!(composed(&priority, two_space_snapshot())
+        .hits
+        .agent_group_headers
+        .is_empty());
+
+    let mut viewed = two_space_snapshot();
+    viewed.agent_view_label = Some("review".into());
+    viewed.agent_order = vec!["pane_2".into(), "pane_1".into()];
+    let state = composed(&Config::default(), viewed);
+    assert_eq!(listed_agents(&state), ["pane_2", "pane_1"]);
+    assert!(state.hits.agent_group_headers.is_empty());
+}
+
+#[test]
+fn one_space_keeps_the_list_without_a_header() {
+    let mut projected = two_space_snapshot();
+    projected.agents.truncate(1);
+
+    let state = composed(&Config::default(), projected);
+
+    assert!(state.hits.agent_group_headers.is_empty());
+    assert_eq!(agent_rect(&state, "pane_1").y, state.hits.agent_body.y);
+}
+
+#[test]
+fn rows_that_only_repeat_the_space_fold_into_its_header() {
+    use crate::config::AgentSidebarToken;
+
+    let mut config = Config::default();
+    config.ui.sidebar.agents.rows = vec![
+        vec![AgentSidebarToken::StateIcon, AgentSidebarToken::Agent],
+        vec![AgentSidebarToken::Workspace],
+    ];
+    let grouped = composed(&config, two_space_snapshot());
+    assert_eq!(agent_rect(&grouped, "pane_1").height, 1);
+
+    // Without headers the row is the only place the space is named, so it stays.
+    config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
+    let flat = composed(&config, two_space_snapshot());
+    assert_eq!(agent_rect(&flat, "pane_1").height, 2);
+
+    // A row that carries more than the space name is never dropped.
+    let default_rows = two_space_state();
+    assert_eq!(agent_rect(&default_rows, "pane_1").height, 2);
+}
+
+#[test]
+fn chip_of_a_space_needing_attention_uses_its_status_color() {
+    let mut projected = two_space_snapshot();
+    projected.workspaces[1].agent_status = AgentStatus::Blocked;
+    projected.agents[1].agent_status = AgentStatus::Blocked;
+    let mut state = composed(&Config::default(), projected);
+    let frame = state.compose(106, 30).expect("agent sidebar frame");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let palette = &state.config.palette;
+
+    let blocked = cell_symbol_position(&frame, chip_rect(&state, Some("ws_2")), "second");
+    let calm = cell_symbol_position(&frame, chip_rect(&state, Some("ws_1")), "client-shell");
+
+    assert_eq!(
+        buffer[blocked].fg,
+        super::super::status_color(AgentStatus::Blocked, palette)
+    );
+    assert_eq!(buffer[calm].fg, palette.overlay0);
+}

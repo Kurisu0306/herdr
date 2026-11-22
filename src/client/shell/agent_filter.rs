@@ -87,6 +87,22 @@ pub(super) struct AgentFilterChip<'a> {
     endpoint_id: &'a ClientEndpointId,
     workspace_id: &'a str,
     label: &'a str,
+    /// Rolled-up agent state of the space, as the Spaces panel shows it.
+    status: crate::api::schema::AgentStatus,
+}
+
+/// Spaces in Spaces-panel order, each with the name that panel lists it under.
+pub(super) fn space_labels(snapshot: &ClientShellSnapshot) -> Vec<(&ClientShellWorkspace, &str)> {
+    super::render::workspace_entries(snapshot, &HashSet::new())
+        .into_iter()
+        .filter_map(|entry| {
+            let workspace = snapshot.workspaces.get(entry.index)?;
+            Some((
+                workspace,
+                super::sidebar::workspace_display_label(workspace, entry.indented),
+            ))
+        })
+        .collect()
 }
 
 /// One chip per space that has agents, in the order and with the labels the Spaces panel uses.
@@ -107,18 +123,17 @@ pub(super) fn snapshot_chips<'a>(
         .iter()
         .map(|agent| agent.workspace_id.as_str())
         .collect::<HashSet<_>>();
-    super::render::workspace_entries(snapshot, &HashSet::new())
+    space_labels(snapshot)
         .into_iter()
-        .filter_map(|entry| {
-            let workspace = snapshot.workspaces.get(entry.index)?;
+        .filter(|(workspace, _)| {
             let workspace_id = workspace.workspace_id.as_str();
-            (populated.contains(workspace_id) || selected == Some(workspace_id)).then(|| {
-                AgentFilterChip {
-                    endpoint_id,
-                    workspace_id,
-                    label: super::sidebar::workspace_display_label(workspace, entry.indented),
-                }
-            })
+            populated.contains(workspace_id) || selected == Some(workspace_id)
+        })
+        .map(|(workspace, label)| AgentFilterChip {
+            endpoint_id,
+            workspace_id: &workspace.workspace_id,
+            label,
+            status: workspace.agent_status,
         })
         .collect()
 }
@@ -287,13 +302,23 @@ pub(super) fn render_chips<'a>(
     let origin_y = area.y.saturating_add(PANEL_TITLE_ROWS);
     for slot in &layout.slots {
         let rect = Rect::new(origin_x + slot.x, origin_y + slot.row, slot.width, 1);
+        let chip = slot.index.checked_sub(1).and_then(|index| chips.get(index));
         let style = if slot.index == active_index {
             Style::default()
                 .fg(palette.accent)
                 .bg(palette.active_row_bg)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(palette.overlay0)
+            // A space waiting on the user stays noticeable while another space is selected.
+            let attention = chip.map(|chip| chip.status).filter(|status| {
+                matches!(
+                    status,
+                    crate::api::schema::AgentStatus::Blocked
+                        | crate::api::schema::AgentStatus::Done
+                )
+            });
+            Style::default()
+                .fg(attention.map_or(palette.overlay0, |status| status_color(status, palette)))
         };
         put_text(
             buffer,
@@ -304,14 +329,10 @@ pub(super) fn render_chips<'a>(
             style,
         );
         if config.mouse_capture {
-            let target = slot
-                .index
-                .checked_sub(1)
-                .and_then(|index| chips.get(index))
-                .map(|chip| AgentPanelFilter {
-                    endpoint_id: chip.endpoint_id.clone(),
-                    workspace_id: chip.workspace_id.to_owned(),
-                });
+            let target = chip.map(|chip| AgentPanelFilter {
+                endpoint_id: chip.endpoint_id.clone(),
+                workspace_id: chip.workspace_id.to_owned(),
+            });
             hits.agent_filter_chips.push((rect, target));
         }
     }
