@@ -533,3 +533,54 @@ fn narrow_sidebar_drops_the_age_before_the_row_text() {
     assert!(!state.hits.agents.is_empty());
     assert!(!state.hits.agent_ages_shown);
 }
+
+#[test]
+fn mobile_switcher_offers_the_way_back_to_every_space() {
+    let mobile_agents = |state: &ClientShellState| {
+        state
+            .hits
+            .mobile_targets
+            .iter()
+            .filter(|(_, target)| matches!(target, ClientMobileTarget::Agent { .. }))
+            .count()
+    };
+    let clear_rect = |state: &ClientShellState| {
+        state
+            .hits
+            .mobile_targets
+            .iter()
+            .find(|(_, target)| *target == ClientMobileTarget::ClearAgentFilter)
+            .map(|(rect, _)| *rect)
+    };
+    let mut state = two_space_state();
+    state.mode = ClientShellMode::Navigate;
+    state.compose(44, 30).expect("mobile switcher");
+    assert_eq!(mobile_agents(&state), 2);
+    assert_eq!(clear_rect(&state), None);
+
+    state.config.agent_panel_filter = Some(super::super::agent_filter::AgentPanelFilter {
+        endpoint_id: ClientEndpointId::Local,
+        space: "second".into(),
+    });
+    state.compose(44, 30).expect("filtered mobile switcher");
+    assert_eq!(mobile_agents(&state), 1);
+    let clear = clear_rect(&state).expect("show all spaces action");
+
+    state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: clear.x,
+        row: clear.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
+        column: clear.x,
+        row: clear.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    state.compose(44, 30).expect("mobile switcher");
+
+    assert_eq!(state.config.agent_panel_filter, None);
+    assert_eq!(state.mode, ClientShellMode::Navigate);
+    assert_eq!(mobile_agents(&state), 2);
+}

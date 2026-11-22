@@ -616,16 +616,24 @@ fn mobile_items(
         config.agent_panel_sort,
         config.agent_panel_filter.as_ref(),
     );
-    // The switcher has no chip strip, so name the space a filter chosen in the sidebar keeps.
-    let agent_view_label = snapshot.agent_view_label.as_deref().or_else(|| {
+    // The switcher has no chip strip, so it names the space a filter chosen in the sidebar
+    // keeps and offers the way back to every space.
+    let filter_space =
         super::agent_filter::live_filter(config.agent_panel_filter.as_ref(), endpoints)
-            .map(|filter| filter.space.as_str())
-    });
+            .map(|filter| filter.space.as_str());
+    let agent_view_label = snapshot.agent_view_label.as_deref().or(filter_space);
     if !agents.is_empty() || agent_view_label.is_some() {
         let title = agent_view_label
             .map(|label| format!("agents · {label}"))
             .unwrap_or_else(|| "agents".to_owned());
         items.push(MobileItem::section(title, palette));
+        if filter_space.is_some() {
+            items.push(MobileItem::action(
+                "  × show all spaces",
+                ClientMobileTarget::ClearAgentFilter,
+                palette,
+            ));
+        }
         if agents.is_empty() {
             items.push(MobileItem {
                 lines: vec![Line::from(Span::styled(
@@ -1019,6 +1027,10 @@ impl ClientShellState {
                     self.mode = ClientShellMode::Terminal;
                     self.navigate_workspace_id = None;
                 }
+            }
+            Some(ClientMobileTarget::ClearAgentFilter) => {
+                self.config.agent_panel_filter = None;
+                outcome.repaint = true;
             }
             Some(ClientMobileTarget::NewWorkspace) => {
                 self.mobile_switcher_suspended = true;

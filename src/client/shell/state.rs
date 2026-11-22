@@ -69,6 +69,8 @@ pub(super) struct ClientShellLayout {
 pub(super) enum ClientMobileTarget {
     Machine(ClientEndpointId),
     NewWorkspace,
+    /// Returns the Agents list to every space; the switcher has no chips to click.
+    ClearAgentFilter,
     Workspace {
         endpoint_id: ClientEndpointId,
         workspace_id: String,
