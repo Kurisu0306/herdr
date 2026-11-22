@@ -397,6 +397,7 @@ rows = [
 Agent rows accept these built-in tokens:
 
 - `state_icon` — colored icon for the agent's semantic state.
+- `agent_icon` — one-cell mark for the agent (`✳` Claude, `⬡` Codex, `✦` Gemini, `π` Pi, `◆` for others), drawn in the state color so it can replace `state_icon`.
 - `state_text` — `idle`, `working`, `blocked`, `done`, or `unknown`, including a reported display label when present.
 - `machine` — machine label when the client has multiple machines; omitted for a single local machine.
 - `workspace` — workspace name.

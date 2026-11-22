@@ -107,6 +107,8 @@ pub struct SidebarTokenStyle {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentSidebarToken {
     StateIcon,
+    /// Glyph identifying the agent, drawn in the color of its state.
+    AgentIcon,
     StateText,
     Machine,
     Workspace,
@@ -200,7 +202,10 @@ impl RawSidebarToken {
                     return Err("sidebar tokens may contain at most 16 rules".into());
                 }
                 if !token.rules.is_empty()
-                    && matches!(token.token.as_str(), "state_icon" | "git_status")
+                    && matches!(
+                        token.token.as_str(),
+                        "state_icon" | "agent_icon" | "git_status"
+                    )
                 {
                     return Err("sidebar rules require a text-valued token".into());
                 }
@@ -271,6 +276,7 @@ where
 fn agent_token_name(token: &AgentSidebarToken) -> String {
     match token {
         AgentSidebarToken::StateIcon => "state_icon".into(),
+        AgentSidebarToken::AgentIcon => "agent_icon".into(),
         AgentSidebarToken::StateText => "state_text".into(),
         AgentSidebarToken::Machine => "machine".into(),
         AgentSidebarToken::Workspace => "workspace".into(),
@@ -330,6 +336,7 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
             value,
             &[
                 ("state_icon", Self::StateIcon),
+                ("agent_icon", Self::AgentIcon),
                 ("state_text", Self::StateText),
                 ("machine", Self::Machine),
                 ("workspace", Self::Workspace),
@@ -656,6 +663,7 @@ rows = [[{ token = "$status", rules = [{ contains = "error", bold = true }] }]]
         }
         for (section, token) in [
             ("agents", "state_icon"),
+            ("agents", "agent_icon"),
             ("spaces", "state_icon"),
             ("spaces", "git_status"),
         ] {

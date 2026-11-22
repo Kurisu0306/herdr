@@ -12,6 +12,7 @@ pub(crate) struct ResolvedToken {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ResolvedTokenKind {
     StateIcon,
+    AgentIcon(&'static str),
     StateText(String),
     Machine(String),
     Workspace(String),
@@ -36,7 +37,7 @@ impl ResolvedTokenKind {
             | Self::TerminalTitle(value)
             | Self::Branch(value)
             | Self::Custom(value) => Some(value),
-            Self::StateIcon | Self::GitStatus { .. } => None,
+            Self::StateIcon | Self::AgentIcon(_) | Self::GitStatus { .. } => None,
         }
     }
 }
@@ -79,6 +80,9 @@ pub(crate) fn agent_rows(
                     let (token, style) = configured.parts();
                     let kind = match token {
                         AgentSidebarToken::StateIcon => Some(ResolvedTokenKind::StateIcon),
+                        AgentSidebarToken::AgentIcon => Some(ResolvedTokenKind::AgentIcon(
+                            agent_icon(context.canonical_agent),
+                        )),
                         AgentSidebarToken::StateText => {
                             Some(ResolvedTokenKind::StateText(state_text.to_string()))
                         }
@@ -177,9 +181,24 @@ pub(crate) fn space_rows(
         .collect()
 }
 
+/// One-cell glyph standing for an agent, so a list of mixed agents can be scanned by shape.
+/// Agents without a mark of their own share a neutral one.
+fn agent_icon(agent: Option<crate::detect::Agent>) -> &'static str {
+    use crate::detect::Agent;
+    match agent {
+        Some(Agent::Claude) => "✳",
+        Some(Agent::Codex) => "⬡",
+        Some(Agent::Gemini) => "✦",
+        Some(Agent::Pi) => "π",
+        _ => "◆",
+    }
+}
+
 pub(crate) fn separator(previous: &ResolvedToken, current: &ResolvedToken) -> &'static str {
-    if matches!(previous.kind, ResolvedTokenKind::StateIcon)
-        || matches!(current.kind, ResolvedTokenKind::GitStatus { .. })
+    if matches!(
+        previous.kind,
+        ResolvedTokenKind::StateIcon | ResolvedTokenKind::AgentIcon(_)
+    ) || matches!(current.kind, ResolvedTokenKind::GitStatus { .. })
     {
         " "
     } else {
@@ -385,6 +404,26 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
             );
             assert_eq!(rows.len(), count);
         }
+    }
+
+    #[test]
+    fn agent_icon_marks_the_agent_and_joins_like_the_state_icon() {
+        let config: AgentsSidebarConfig =
+            toml::from_str("rows = [['agent_icon', 'agent']]").unwrap();
+        let mut entry = entry();
+
+        let rows = agent_rows(&config, context(&entry), "idle");
+        assert_eq!(rows[0][0].kind, ResolvedTokenKind::AgentIcon("π"));
+        assert_eq!(separator(&rows[0][0], &rows[0][1]), " ");
+
+        entry.canonical_agent = Some(crate::detect::Agent::Claude);
+        let rows = agent_rows(&config, context(&entry), "idle");
+        assert_eq!(rows[0][0].kind, ResolvedTokenKind::AgentIcon("✳"));
+
+        // A custom or unrecognized agent still gets a mark, so rows stay aligned.
+        entry.canonical_agent = None;
+        let rows = agent_rows(&config, context(&entry), "idle");
+        assert_eq!(rows[0][0].kind, ResolvedTokenKind::AgentIcon("◆"));
     }
 
     #[test]

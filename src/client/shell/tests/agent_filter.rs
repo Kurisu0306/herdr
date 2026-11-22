@@ -589,3 +589,25 @@ fn mobile_switcher_offers_the_way_back_to_every_space() {
     assert_eq!(state.mode, ClientShellMode::Navigate);
     assert_eq!(mobile_agents(&state), 2);
 }
+
+#[test]
+fn agent_icon_is_drawn_in_the_color_of_the_agent_state() {
+    use crate::config::AgentSidebarToken;
+
+    let mut projected = two_space_snapshot();
+    projected.agents[0].agent = Some("claude".into());
+    projected.agents[0].agent_status = AgentStatus::Blocked;
+    let mut config = Config::default();
+    config.ui.sidebar.agents.rows =
+        vec![vec![AgentSidebarToken::AgentIcon, AgentSidebarToken::Agent]];
+    let mut state = composed(&config, projected);
+    let frame = state.compose(106, 30).expect("agent sidebar frame");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+
+    let icon = cell_symbol_position(&frame, agent_rect(&state, "pane_1"), "✳");
+
+    assert_eq!(
+        buffer[icon].fg,
+        super::super::status_color(AgentStatus::Blocked, &state.config.palette)
+    );
+}
