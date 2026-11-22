@@ -111,6 +111,15 @@ pub struct PaneSnapshot {
     pub agent_resume: Option<PaneAgentResumeSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_argv: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_state_change: Option<PaneAgentStateChangeSnapshot>,
+}
+
+/// The state a pane's agent was saved in and the Unix time, in milliseconds, it entered it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneAgentStateChangeSnapshot {
+    pub state: crate::detect::AgentState,
+    pub at_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -378,6 +387,15 @@ fn capture_tab(
                 agent: resume.agent.clone(),
                 argv: resume.argv.clone(),
             });
+        let agent_state_change = terminal.and_then(|terminal| {
+            let at_ms = terminal.last_agent_state_change_at_ms?;
+            (terminal.state != crate::detect::AgentState::Unknown).then_some(
+                PaneAgentStateChangeSnapshot {
+                    state: terminal.state,
+                    at_ms,
+                },
+            )
+        });
         panes.insert(
             id.raw(),
             PaneSnapshot {
@@ -388,6 +406,7 @@ fn capture_tab(
                 agent_session,
                 agent_resume,
                 launch_argv,
+                agent_state_change,
             },
         );
     }
@@ -707,6 +726,7 @@ mod tests {
                 agent_session: None,
                 agent_resume: None,
                 launch_argv: None,
+                agent_state_change: None,
             },
         );
         panes.insert(
@@ -719,6 +739,7 @@ mod tests {
                 agent_session: None,
                 agent_resume: None,
                 launch_argv: None,
+                agent_state_change: None,
             },
         );
 
@@ -1340,6 +1361,42 @@ mod tests {
     }
 
     #[test]
+    fn capture_contract_tracks_when_an_agent_entered_its_state() {
+        let mut state = state_with_workspaces(&["one"]);
+        let root = state.workspaces[0].tabs[0].root_pane;
+        state.ensure_test_terminals();
+        let terminal_id = state.workspaces[0].tabs[0].panes[&root]
+            .attached_terminal_id
+            .clone();
+        let terminal = state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.state = crate::detect::AgentState::Idle;
+        terminal.last_agent_state_change_at_ms = Some(1_700_000_000_000);
+
+        let snapshot = capture_from_state(&state);
+        let pane = &snapshot.workspaces[0].tabs[0].panes[&root.raw()];
+        assert_eq!(
+            pane.agent_state_change,
+            Some(PaneAgentStateChangeSnapshot {
+                state: crate::detect::AgentState::Idle,
+                at_ms: 1_700_000_000_000,
+            })
+        );
+        // Session files written before this field existed still load.
+        let mut saved = serde_json::to_value(pane).unwrap();
+        saved.as_object_mut().unwrap().remove("agent_state_change");
+        let legacy: PaneSnapshot = serde_json::from_value(saved).unwrap();
+        assert_eq!(legacy.agent_state_change, None);
+
+        // A plain shell has no agent state to come back to.
+        state.terminals.get_mut(&terminal_id).unwrap().state = crate::detect::AgentState::Unknown;
+        let snapshot = capture_from_state(&state);
+        assert_eq!(
+            snapshot.workspaces[0].tabs[0].panes[&root.raw()].agent_state_change,
+            None
+        );
+    }
+
+    #[test]
     fn capture_contract_preserves_restored_agent_session() {
         let mut state = state_with_workspaces(&["one"]);
         let root = state.workspaces[0].tabs[0].root_pane;
@@ -1405,6 +1462,7 @@ mod tests {
                 agent_session: None,
                 agent_resume: None,
                 launch_argv: None,
+                agent_state_change: None,
             },
         );
         panes.insert(
@@ -1419,6 +1477,7 @@ mod tests {
                 agent_session: None,
                 agent_resume: None,
                 launch_argv: None,
+                agent_state_change: None,
             },
         );
 

@@ -1756,8 +1756,11 @@ impl AppState {
             self.next_agent_state_change_seq += 1;
             if let Some(terminal) = self.terminals.get_mut(&terminal_id) {
                 terminal.last_agent_state_change_seq = Some(self.next_agent_state_change_seq);
-                terminal.last_agent_state_change_at_ms =
-                    Some(crate::agent_state_time::unix_ms_now());
+                terminal.stamp_agent_state_change(
+                    change.state,
+                    Instant::now(),
+                    crate::agent_state_time::unix_ms_now(),
+                );
                 terminal.last_agent_completion_seq = (!suppress_completion
                     && is_completion_transition(&change))
                 .then_some(self.next_agent_state_change_seq);

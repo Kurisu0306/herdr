@@ -539,6 +539,7 @@ fn restore_tab(
             .and_then(crate::detect::parse_canonical_agent_label);
         let saved_launch_argv = saved_pane.and_then(|p| p.launch_argv.clone());
         let saved_agent_session = saved_pane.and_then(|p| p.agent_session.as_ref());
+        let saved_agent_state_change = saved_pane.and_then(|p| p.agent_state_change);
         let saved_agent_resume = saved_pane.and_then(saved_reported_resume);
         let saved_history =
             old_id.and_then(|old_id| history.and_then(|history| history.panes.get(old_id)));
@@ -598,6 +599,13 @@ fn restore_tab(
             }
             if let Some(session) = restored_agent_session {
                 terminal.set_persisted_agent_session(session);
+            }
+            if let Some(change) = saved_agent_state_change {
+                terminal.restore_agent_state_change(
+                    change.state,
+                    change.at_ms,
+                    std::time::Instant::now(),
+                );
             }
             if let Some(resume) = restored_agent_resume {
                 terminal.restore_reported_resume(resume);
@@ -698,6 +706,13 @@ fn restore_tab(
                 }
                 if let Some(session) = restored_agent_session {
                     terminal.set_persisted_agent_session(session);
+                }
+                if let Some(change) = saved_agent_state_change {
+                    terminal.restore_agent_state_change(
+                        change.state,
+                        change.at_ms,
+                        std::time::Instant::now(),
+                    );
                 }
                 if let Some(resume) = restored_agent_resume {
                     terminal.restore_reported_resume(resume);
@@ -1554,6 +1569,12 @@ mod tests {
                             }),
                             agent_resume: None,
                             launch_argv: None,
+                            agent_state_change: Some(
+                                super::super::snapshot::PaneAgentStateChangeSnapshot {
+                                    state: crate::detect::AgentState::Idle,
+                                    at_ms: 1_700_000_000_000,
+                                },
+                            ),
                         },
                     )]),
                     zoomed: false,
@@ -1570,7 +1591,7 @@ mod tests {
         };
         let (events, _event_rx) = mpsc::channel(4);
 
-        let (_workspaces, terminals, _runtimes) = restore(
+        let (_workspaces, mut terminals, _runtimes) = restore(
             &snapshot,
             None,
             24,
@@ -1585,7 +1606,7 @@ mod tests {
         );
 
         let terminal = terminals
-            .values()
+            .values_mut()
             .next()
             .expect("restored terminal should exist");
         assert!(
@@ -1601,6 +1622,17 @@ mod tests {
         assert_eq!(session.source, "herdr:opencode");
         assert_eq!(session.agent, "opencode");
         assert_eq!(session.session_ref.value, "opencode-session");
+
+        // The agent is detected idle again after the restart; it has been idle since before it.
+        terminal.stamp_agent_state_change(
+            crate::detect::AgentState::Idle,
+            std::time::Instant::now(),
+            1_800_000_000_000,
+        );
+        assert_eq!(
+            terminal.last_agent_state_change_at_ms,
+            Some(1_700_000_000_000)
+        );
     }
 
     #[tokio::test]
@@ -1636,6 +1668,7 @@ mod tests {
                                 agent_session: None,
                                 agent_resume: None,
                                 launch_argv: None,
+                                agent_state_change: None,
                             },
                         ),
                         (
@@ -1648,6 +1681,7 @@ mod tests {
                                 agent_session: None,
                                 agent_resume: None,
                                 launch_argv: None,
+                                agent_state_change: None,
                             },
                         ),
                     ]),
@@ -1702,6 +1736,7 @@ mod tests {
                     agent_session: None,
                     agent_resume: None,
                     launch_argv: None,
+                    agent_state_change: None,
                 },
             )
         };
@@ -1718,6 +1753,7 @@ mod tests {
             }),
             agent_resume: None,
             launch_argv: None,
+            agent_state_change: None,
         };
         let snapshot = SessionSnapshot {
             version: super::super::snapshot::SNAPSHOT_VERSION,
@@ -1870,6 +1906,7 @@ mod tests {
                             }),
                             agent_resume: None,
                             launch_argv: None,
+                            agent_state_change: None,
                         },
                     )]),
                     zoomed: false,
@@ -2176,6 +2213,7 @@ mod tests {
                 agent_session: None,
                 agent_resume: None,
                 launch_argv: None,
+                agent_state_change: None,
             },
         );
         let mut history = SessionHistorySnapshot {

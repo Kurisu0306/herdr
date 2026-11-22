@@ -121,6 +121,16 @@ struct RecentAgentProcessExit {
     observed_at: Instant,
 }
 
+/// How long a restored agent may take to be detected in its saved state again.
+const RESTORED_STATE_SETTLE: std::time::Duration = std::time::Duration::from_secs(120);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RestoredAgentStateChange {
+    state: AgentState,
+    at_ms: u64,
+    restored_at: Instant,
+}
+
 /// Pure state for a server-owned terminal.
 ///
 /// During the migration this is still one-to-one with a pane-backed PTY, but
@@ -156,6 +166,8 @@ pub struct TerminalState {
     pub last_agent_state_change_seq: Option<u64>,
     /// Unix time in milliseconds of the change `last_agent_state_change_seq` numbers.
     pub last_agent_state_change_at_ms: Option<u64>,
+    /// State and change time saved before a server restart, until the agent settles again.
+    restored_agent_state_change: Option<RestoredAgentStateChange>,
     pub last_agent_completion_seq: Option<u64>,
     pub revision: u64,
     pub launch_argv: Option<Vec<String>>,
@@ -197,6 +209,7 @@ impl TerminalState {
             state: AgentState::Unknown,
             last_agent_state_change_seq: None,
             last_agent_state_change_at_ms: None,
+            restored_agent_state_change: None,
             last_agent_completion_seq: None,
             revision: 0,
             launch_argv: None,
@@ -2074,6 +2087,30 @@ impl TerminalState {
         }
     }
 
+    /// Remembers the state and change time a restarted server loaded for this pane's agent.
+    pub fn restore_agent_state_change(&mut self, state: AgentState, at_ms: u64, now: Instant) {
+        self.restored_agent_state_change = Some(RestoredAgentStateChange {
+            state,
+            at_ms,
+            restored_at: now,
+        });
+    }
+
+    /// Records when the agent changed into `state`.
+    ///
+    /// A restored agent passes through other states while it starts up and is then detected in
+    /// its saved state again. That is the stretch it was already in, not a new change, so it
+    /// keeps the saved time. Later returns to that state are real changes.
+    pub fn stamp_agent_state_change(&mut self, state: AgentState, now: Instant, now_ms: u64) {
+        let restored = self.restored_agent_state_change.filter(|restored| {
+            now.saturating_duration_since(restored.restored_at) < RESTORED_STATE_SETTLE
+        });
+        let resumed = restored.filter(|restored| restored.state == state);
+        self.restored_agent_state_change = restored.filter(|_| resumed.is_none());
+        self.last_agent_state_change_at_ms =
+            Some(resumed.map_or(now_ms, |restored| restored.at_ms));
+    }
+
     pub fn full_lifecycle_hook_authority_active(&self) -> bool {
         self.live_full_lifecycle_hook_authority()
     }
@@ -2341,6 +2378,7 @@ impl TerminalState {
         self.state = AgentState::Unknown;
         self.last_agent_state_change_seq = None;
         self.last_agent_state_change_at_ms = None;
+        self.restored_agent_state_change = None;
         self.last_agent_completion_seq = None;
         self.launch_argv = None;
         self.respawn_shell_on_exit = false;
@@ -2460,6 +2498,40 @@ mod tests {
 
     fn test_terminal() -> TerminalState {
         TerminalState::new(TerminalId::alloc(), "/tmp".into())
+    }
+
+    #[test]
+    fn restored_agent_keeps_its_saved_change_time_once_it_settles() {
+        let mut terminal = test_terminal();
+        let restored_at = Instant::now();
+        let after = |seconds| restored_at + Duration::from_secs(seconds);
+        terminal.restore_agent_state_change(AgentState::Idle, 1_000, restored_at);
+
+        // Starting up again passes through other states before the saved one is seen.
+        terminal.stamp_agent_state_change(AgentState::Working, after(5), 9_000);
+        assert_eq!(terminal.last_agent_state_change_at_ms, Some(9_000));
+        terminal.stamp_agent_state_change(AgentState::Idle, after(10), 9_500);
+        assert_eq!(terminal.last_agent_state_change_at_ms, Some(1_000));
+
+        // Coming back to the same state after new work is a real change.
+        terminal.stamp_agent_state_change(AgentState::Working, after(20), 9_600);
+        terminal.stamp_agent_state_change(AgentState::Idle, after(30), 9_700);
+        assert_eq!(terminal.last_agent_state_change_at_ms, Some(9_700));
+    }
+
+    #[test]
+    fn saved_change_time_expires_when_the_agent_does_not_settle_in_time() {
+        let mut terminal = test_terminal();
+        let restored_at = Instant::now();
+        terminal.restore_agent_state_change(AgentState::Idle, 1_000, restored_at);
+
+        terminal.stamp_agent_state_change(
+            AgentState::Idle,
+            restored_at + RESTORED_STATE_SETTLE,
+            9_000,
+        );
+
+        assert_eq!(terminal.last_agent_state_change_at_ms, Some(9_000));
     }
 
     fn test_session_path(name: &str) -> String {
