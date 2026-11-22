@@ -37,14 +37,26 @@ pub(super) struct AgentListOrder<'a> {
     pub(super) sort: crate::config::AgentPanelSortConfig,
     /// Space name a live filter keeps.
     pub(super) space: Option<&'a str>,
-    /// Collapsed space names, when the tree sidebar arranges the list.
-    pub(super) tree: Option<&'a HashSet<String>>,
+    /// Folded space names. Their agents leave the list wherever spaces are shown as groups.
+    pub(super) collapsed: Option<&'a HashSet<String>>,
+    /// Whether the tree sidebar arranges the list.
+    pub(super) tree: bool,
+}
+
+/// The parts of the list order that only a single machine's list has.
+#[derive(Clone, Copy)]
+pub(super) struct LocalListOrder<'a> {
+    pub(super) collapsed: &'a HashSet<String>,
+    pub(super) tree: bool,
 }
 
 impl ClientShellConfig {
-    /// Collapsed space names when the tree sidebar arranges the Agents list.
-    pub(super) fn tree_collapsed_spaces(&self) -> Option<&HashSet<String>> {
-        self.sidebar_tree.then_some(&self.collapsed_spaces)
+    /// Folding and the tree arrangement, when either changes the list a single machine shows.
+    pub(super) fn local_list_order(&self) -> Option<LocalListOrder<'_>> {
+        (self.sidebar_tree || !self.collapsed_spaces.is_empty()).then_some(LocalListOrder {
+            collapsed: &self.collapsed_spaces,
+            tree: self.sidebar_tree,
+        })
     }
 
     pub(super) fn agent_list_order<'a>(
@@ -55,7 +67,8 @@ impl ClientShellConfig {
         AgentListOrder {
             sort: self.agent_panel_sort,
             space: self.agent_filter_space(endpoint_id, snapshot),
-            tree: self.tree_collapsed_spaces(),
+            collapsed: Some(&self.collapsed_spaces),
+            tree: self.sidebar_tree,
         }
     }
 }
@@ -69,7 +82,7 @@ pub(super) fn ordered_agent_pane_ids(
     let gathers = order.sort == crate::config::AgentPanelSortConfig::Spaces
         && snapshot.agent_view_label.is_none()
         && snapshot.agents.len() > 1;
-    let spaces = if order.space.is_some() || order.tree.is_some() || gathers {
+    let spaces = if order.space.is_some() || order.tree || gathers {
         super::agent_filter::space_labels(snapshot)
     } else {
         Vec::new()
@@ -107,10 +120,15 @@ pub(super) fn ordered_agent_pane_ids_among(
     } else {
         snapshot.agents.iter().filter(kept).collect::<Vec<_>>()
     };
-    if let Some(collapsed) = order.tree {
+    let folded = |agents: &mut Vec<&crate::protocol::ClientShellAgent>| {
+        if let Some(collapsed) = order.collapsed.filter(|collapsed| !collapsed.is_empty()) {
+            agents.retain(|agent| !collapsed.contains(&name(agent)));
+        }
+    };
+    if order.tree {
         // The tree lists spaces in Spaces-panel order and, inside each, the agents that need
-        // the user first. A collapsed space hides its agents from the list and from navigation.
-        agents.retain(|agent| !collapsed.contains(&name(agent)));
+        // the user first. A folded space hides its agents from the list and from navigation.
+        folded(&mut agents);
         let rank = |agent: &crate::protocol::ClientShellAgent| {
             let space = super::agent_filter::space_name(spaces, &agent.workspace_id);
             spaces
@@ -137,6 +155,12 @@ pub(super) fn ordered_agent_pane_ids_among(
                     agents.iter().map(|agent| name(agent)),
                 );
                 super::agent_groups::gather_by_rank(&mut agents, ranks);
+                // Folding is offered on the group headers, which need two spaces to appear.
+                if !super::agent_groups::group_starts(agents.iter().map(|agent| name(agent)))
+                    .is_empty()
+                {
+                    folded(&mut agents);
+                }
             }
             crate::config::AgentPanelSortConfig::Spaces => {}
         }
@@ -154,6 +178,7 @@ pub(super) fn render_agent_panel(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
+    reveal_pane: Option<String>,
     hits: &mut ShellHitMap,
 ) {
     if !render_agent_panel_header(
@@ -186,34 +211,57 @@ pub(super) fn render_agent_panel(
         config,
         hits,
     );
+    // Every agent the list could show; folding is applied to the items so a folded space can
+    // still say how many agents it holds.
     let mut rows = ordered_agent_pane_ids_among(
         snapshot,
         &spaces,
         AgentListOrder {
             sort: config.agent_panel_sort,
             space: filter.map(|filter| filter.space.as_str()),
-            tree: None,
+            collapsed: None,
+            tree: false,
         },
     )
     .into_iter()
     .filter_map(|pane_id| agent_row(snapshot, &pane_id, config, None, now_ms))
     .collect::<Vec<_>>();
-    let headers = if filter.is_none()
+    let name =
+        |row: &AgentRow| super::agent_filter::space_name(&spaces, &row.workspace_id).to_owned();
+    let starts = if filter.is_none()
         && super::agent_groups::grouped_order(config, snapshot.agent_view_label.as_deref())
     {
-        space_headers(endpoint_id, &spaces, &rows)
+        super::agent_groups::group_starts(rows.iter().map(name))
     } else {
         Vec::new()
     };
-    if filter.is_some() || !headers.is_empty() {
+    if filter.is_some() || !starts.is_empty() {
         rows.iter_mut().for_each(AgentRow::drop_space_only_rows);
     }
+    let items = super::agent_groups::grouped_items(rows, &starts, |row, agents| {
+        super::agent_groups::AgentGroupHeader {
+            label: name(row),
+            target: super::agent_filter::AgentPanelFilter {
+                endpoint_id: endpoint_id.clone(),
+                space: name(row),
+            },
+            fold: Some(super::agent_groups::GroupFold {
+                collapsed: config.collapsed_spaces.contains(&name(row)),
+                agents,
+            }),
+        }
+    });
+    let reveal = reveal_pane.and_then(|pane_id| {
+        items
+            .iter()
+            .position(|item| item.row.as_ref().is_some_and(|row| row.pane_id == pane_id))
+    });
     render_agent_list(
         buffer,
         area,
         list_offset,
-        &rows,
-        &headers,
+        &items,
+        reveal,
         (snapshot.agent_view_label.is_some() || filter.is_some()).then_some(" no matching agents"),
         config,
         agent_scroll,
@@ -290,12 +338,13 @@ pub(super) fn render_agent_panel_header(
     true
 }
 
+/// Draws the Agents list. `reveal` names the item to scroll into view first.
 pub(super) fn render_agent_list<T>(
     buffer: &mut Buffer,
     area: Rect,
     list_offset: u16,
-    rows: &[T],
-    headers: &[Option<super::agent_groups::AgentGroupHeader>],
+    items: &[super::agent_groups::AgentListItem<T>],
+    reveal: Option<usize>,
     empty_message: Option<&str>,
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
@@ -310,7 +359,7 @@ pub(super) fn render_agent_list<T>(
         area.height.saturating_sub(list_offset),
     );
     hits.agent_body = body;
-    if body.is_empty() || rows.is_empty() {
+    if body.is_empty() || items.is_empty() {
         *agent_scroll = 0;
         if let Some(message) = empty_message.filter(|_| !body.is_empty()) {
             put_text(
@@ -327,13 +376,22 @@ pub(super) fn render_agent_list<T>(
         return;
     }
 
-    let (row_heights, gaps) = super::agent_groups::list_layout(
-        rows.iter().map(&row_lines),
-        headers,
+    let (heights, gaps) = super::agent_groups::list_layout(
+        items
+            .iter()
+            .map(|item| (item.header.is_some(), item.row.as_ref().map(&row_lines))),
         config.agents.row_gap,
     );
-    let metrics =
-        super::scroll::list_scroll_metrics(&row_heights, &gaps, body.height, *agent_scroll);
+    if let Some(target) = reveal {
+        *agent_scroll = super::scroll::list_scroll_start_to_reveal(
+            &heights,
+            &gaps,
+            body.height,
+            *agent_scroll,
+            target,
+        );
+    }
+    let metrics = super::scroll::list_scroll_metrics(&heights, &gaps, body.height, *agent_scroll);
     hits.agent_max_scroll = metrics.max_offset_from_bottom;
     hits.agent_scroll_metrics = Some(metrics);
     *agent_scroll = metrics
@@ -342,31 +400,27 @@ pub(super) fn render_agent_list<T>(
     let show_scrollbar = metrics.max_offset_from_bottom > 0 && body.width > 1;
     let content_width = body.width.saturating_sub(u16::from(show_scrollbar));
     let mut y = body.y;
-    for (index, row) in rows.iter().enumerate().skip(*agent_scroll) {
-        let height = row_heights[index].min(body.height);
+    for (index, item) in items.iter().enumerate().skip(*agent_scroll) {
+        let height = heights[index].min(body.height);
         if y.saturating_add(height) > body.bottom() {
             break;
         }
-        let header = headers.get(index).and_then(Option::as_ref);
-        let header_rows = u16::from(header.is_some()).min(height.saturating_sub(1));
-        if let Some(header) = header.filter(|_| header_rows > 0) {
-            let rect = Rect::new(body.x, y, content_width, 1);
-            put_text(
+        // A header gives way before the row it sits on when the list is one line tall.
+        let header_rows = u16::from(item.header.is_some())
+            .min(height.saturating_sub(u16::from(item.row.is_some())));
+        if let Some(header) = item.header.as_ref().filter(|_| header_rows > 0) {
+            render_group_header(
                 buffer,
-                rect.x.saturating_add(1),
-                rect.y,
-                rect.width.saturating_sub(1),
-                &header.label,
-                Style::default()
-                    .fg(config.palette.overlay0)
-                    .add_modifier(Modifier::BOLD),
+                Rect::new(body.x, y, content_width, 1),
+                header,
+                config,
+                hits,
             );
-            if config.mouse_capture {
-                hits.agent_group_headers.push((rect, header.target.clone()));
-            }
         }
-        let rect = Rect::new(body.x, y + header_rows, content_width, height - header_rows);
-        render_row(buffer, rect, row, hits);
+        if let Some(row) = &item.row {
+            let rect = Rect::new(body.x, y + header_rows, content_width, height - header_rows);
+            render_row(buffer, rect, row, hits);
+        }
         y = y.saturating_add(height).saturating_add(gaps[index]);
     }
 
@@ -377,27 +431,56 @@ pub(super) fn render_agent_list<T>(
     }
 }
 
-/// Headers for the space names a single machine's rows run through.
-fn space_headers(
-    endpoint_id: &ClientEndpointId,
-    spaces: &[(&ClientShellWorkspace, &str)],
-    rows: &[AgentRow],
-) -> Vec<Option<super::agent_groups::AgentGroupHeader>> {
-    let name =
-        |row: &AgentRow| super::agent_filter::space_name(spaces, &row.workspace_id).to_owned();
-    let starts = super::agent_groups::group_starts(rows.iter().map(name));
-    rows.iter()
-        .zip(starts)
-        .map(|(row, start)| {
-            start.then(|| super::agent_groups::AgentGroupHeader {
-                label: name(row),
-                target: super::agent_filter::AgentPanelFilter {
-                    endpoint_id: endpoint_id.clone(),
-                    space: name(row),
-                },
-            })
-        })
-        .collect()
+fn render_group_header(
+    buffer: &mut Buffer,
+    rect: Rect,
+    header: &super::agent_groups::AgentGroupHeader,
+    config: &ClientShellConfig,
+    hits: &mut ShellHitMap,
+) {
+    // A folded space says how many agents it hides, next to the control that shows them.
+    let control = header.fold.map(|fold| {
+        if fold.collapsed {
+            format!("{} ▸", fold.agents)
+        } else {
+            "▾".to_owned()
+        }
+    });
+    let control_width = control
+        .as_deref()
+        .map_or(0, |control| display_width(control) as u16 + 1)
+        .min(rect.width);
+    put_text(
+        buffer,
+        rect.x.saturating_add(1),
+        rect.y,
+        rect.width.saturating_sub(1 + control_width),
+        &header.label,
+        Style::default()
+            .fg(config.palette.overlay0)
+            .add_modifier(Modifier::BOLD),
+    );
+    if config.mouse_capture {
+        hits.agent_group_headers.push((rect, header.target.clone()));
+    }
+    let Some(control) = control else {
+        return;
+    };
+    let width = (display_width(&control) as u16).min(rect.width);
+    put_text(
+        buffer,
+        rect.right() - width,
+        rect.y,
+        width,
+        &control,
+        Style::default().fg(config.palette.accent),
+    );
+    if config.mouse_capture {
+        hits.space_collapse_toggles.push((
+            Rect::new(rect.right() - control_width, rect.y, control_width, 1),
+            header.target.space.clone(),
+        ));
+    }
 }
 
 pub(super) fn agent_row(

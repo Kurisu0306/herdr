@@ -204,7 +204,7 @@ fn keyboard_agent_navigation_scrolls_the_tree_to_its_target() {
     state.compose(106, 14).expect("short tree sidebar");
 
     assert!(listed_agents(&state).contains(&"pane_12"));
-    assert_eq!(state.reveal_tree_agent, None);
+    assert_eq!(state.reveal_agent_pane, None);
 }
 
 #[test]
@@ -213,5 +213,7 @@ fn split_layout_is_untouched_by_the_tree_option() {
 
     assert_eq!(space_rows(&state), ["ws_1", "ws_2", "ws_3"]);
     assert!(!state.hits.workspace_body.is_empty());
-    assert!(state.hits.space_collapse_toggles.is_empty());
+    assert!(!state.hits.sidebar_section_divider.is_empty());
+    // Folding there belongs to the Agents list's own headers, not to the space rows.
+    assert_eq!(state.hits.agent_group_headers.len(), 2);
 }

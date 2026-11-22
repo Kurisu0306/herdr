@@ -611,3 +611,149 @@ fn agent_icon_is_drawn_in_the_color_of_the_agent_state() {
         super::super::status_color(AgentStatus::Blocked, &state.config.palette)
     );
 }
+
+fn fold_rect(state: &ClientShellState, space: &str) -> Rect {
+    state
+        .hits
+        .space_collapse_toggles
+        .iter()
+        .find(|(_, name)| name == space)
+        .map(|(rect, _)| *rect)
+        .expect("fold control")
+}
+
+fn folded(space: &str) -> ClientShellState {
+    let mut state = two_space_state();
+    let fold = fold_rect(&state, space);
+    click(&mut state, fold);
+    state
+}
+
+#[test]
+fn folding_a_space_keeps_its_header_and_hides_its_agents() {
+    let mut state = two_space_state();
+    assert_eq!(state.hits.space_collapse_toggles.len(), 2);
+
+    let fold = fold_rect(&state, "second");
+    let outcome = click(&mut state, fold);
+
+    assert!(outcome.actions.is_empty() && outcome.requests.is_empty());
+    assert_eq!(listed_agents(&state), ["pane_1"]);
+    // Both headers stay, and the folded one says how many agents it holds.
+    assert_eq!(state.hits.agent_group_headers.len(), 2);
+    let frame = state.compose(106, 30).expect("agent sidebar frame");
+    assert!(frame_rows(&frame).iter().any(|row| row.contains("1 ▸")));
+    // The fold control did not select the space as its header would.
+    assert_eq!(state.config.agent_panel_filter, None);
+
+    let fold = fold_rect(&state, "second");
+    click(&mut state, fold);
+    assert_eq!(listed_agents(&state), ["pane_1", "pane_2"]);
+}
+
+#[test]
+fn folded_agents_leave_keyboard_navigation() {
+    let mut state = folded("client-shell");
+    assert_eq!(listed_agents(&state), ["pane_2"]);
+
+    let mut first = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::FocusAgent(0)),
+        &mut first,
+    );
+    assert!(matches!(
+        &first.actions[..],
+        [ClientShellAction::Endpoint { request, .. }]
+            if matches!(
+                &request.method,
+                crate::api::schema::Method::PaneFocus(target) if target.pane_id == "pane_2"
+            )
+    ));
+    // An index past the visible agents must not reach the server's unfolded order.
+    let mut second = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::FocusAgent(1)),
+        &mut second,
+    );
+    assert!(second.actions.is_empty());
+}
+
+#[test]
+fn folding_only_hides_agents_where_a_header_can_unfold_them() {
+    // Priority order has no headers, so a fold left over from the grouped order hides nothing.
+    let mut state = folded("second");
+    state.config.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
+    state.compose(106, 30).expect("agent sidebar frame");
+    assert_eq!(listed_agents(&state).len(), 2);
+    assert!(state.hits.space_collapse_toggles.is_empty());
+
+    // A selected space lists its agents even while it is folded in the grouped list.
+    let mut state = folded("second");
+    let chip = chip_rect(&state, Some("second"));
+    click(&mut state, chip);
+    assert_eq!(listed_agents(&state), ["pane_2"]);
+}
+
+#[test]
+fn clicking_a_folded_header_still_selects_its_space() {
+    let mut state = folded("second");
+    let header = header_rect(&state, "second");
+
+    click(&mut state, header);
+
+    assert_eq!(listed_agents(&state), ["pane_2"]);
+}
+
+#[test]
+fn keyboard_agent_navigation_scrolls_the_grouped_list_to_its_target() {
+    let mut projected = two_space_snapshot();
+    projected.agents = (1..=12)
+        .map(|index| {
+            let space = if index <= 6 { "ws_1" } else { "ws_2" };
+            let tab = if index <= 6 { "tab_1" } else { "tab_2" };
+            space_agent(&format!("pane_{index}"), space, tab, index == 1)
+        })
+        .collect();
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("short agent sidebar");
+    assert!(!listed_agents(&state).contains(&"pane_12"));
+
+    let mut previous = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::PreviousAgent),
+        &mut previous,
+    );
+    state.compose(106, 20).expect("short agent sidebar");
+
+    assert!(listed_agents(&state).contains(&"pane_12"));
+}
+
+#[test]
+fn mobile_way_back_also_unfolds_spaces() {
+    let mut state = folded("second");
+    state.mode = ClientShellMode::Navigate;
+    state.compose(44, 30).expect("mobile switcher");
+    let clear = state
+        .hits
+        .mobile_targets
+        .iter()
+        .find(|(_, target)| *target == ClientMobileTarget::ClearAgentFilter)
+        .map(|(rect, _)| *rect)
+        .expect("show all spaces action");
+
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+            kind,
+            column: clear.x,
+            row: clear.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+    }
+
+    assert!(state.config.collapsed_spaces.is_empty());
+}

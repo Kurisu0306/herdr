@@ -2022,6 +2022,21 @@ impl ClientShellState {
                     }
                     return;
                 }
+                // The fold control sits on a header, so it is matched before the header.
+                let space_toggle = self
+                    .hits
+                    .space_collapse_toggles
+                    .iter()
+                    .find(|(rect, _)| super::contains(*rect, point))
+                    .map(|(_, space)| space.clone());
+                if let Some(space) = space_toggle {
+                    if !self.config.collapsed_spaces.remove(&space) {
+                        self.config.collapsed_spaces.insert(space);
+                    }
+                    outcome.repaint = true;
+                    self.persist_chrome_preferences(outcome);
+                    return;
+                }
                 let space_choice = self
                     .hits
                     .agent_filter_chips
@@ -2110,20 +2125,6 @@ impl ClientShellState {
                         .saturating_add(1)
                         .min(tab_count.saturating_sub(1));
                     outcome.repaint = true;
-                    return;
-                }
-                let space_toggle = self
-                    .hits
-                    .space_collapse_toggles
-                    .iter()
-                    .find(|(rect, _)| super::contains(*rect, point))
-                    .map(|(_, space)| space.clone());
-                if let Some(space) = space_toggle {
-                    if !self.config.collapsed_spaces.remove(&space) {
-                        self.config.collapsed_spaces.insert(space);
-                    }
-                    outcome.repaint = true;
-                    self.persist_chrome_preferences(outcome);
                     return;
                 }
                 let group_toggle = self.hits.workspaces.iter().find_map(|hit| {

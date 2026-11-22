@@ -71,13 +71,13 @@ pub(super) fn render_expanded(
         config,
         hits,
     );
-    let (rows, headers) = agent_list(endpoints, active_endpoint_id, config, agent_view_label);
+    let items = agent_list(endpoints, active_endpoint_id, config, agent_view_label);
     super::agent_sidebar::render_agent_list(
         buffer,
         area,
         list_offset,
-        &rows,
-        &headers,
+        &items,
+        None,
         (agent_view_label.is_some() || filter.is_some()).then_some(" no matching agents"),
         config,
         agent_scroll,
@@ -110,7 +110,7 @@ impl ClientShellState {
         if body_height == 0 {
             return;
         }
-        let (rows, headers) = agent_list(
+        let items = agent_list(
             &self.endpoints,
             &self.active_endpoint_id,
             &self.config,
@@ -118,15 +118,20 @@ impl ClientShellState {
                 .as_deref()
                 .and_then(|snapshot| snapshot.agent_view_label.as_deref()),
         );
-        let Some(target) = rows
-            .iter()
-            .position(|row| &row.endpoint_id == endpoint_id && row.agent.pane_id == pane_id)
-        else {
+        let Some(target) = items.iter().position(|item| {
+            item.row
+                .as_ref()
+                .is_some_and(|row| &row.endpoint_id == endpoint_id && row.agent.pane_id == pane_id)
+        }) else {
             return;
         };
         let (heights, gaps) = super::agent_groups::list_layout(
-            rows.iter().map(|row| row.agent.rows.len()),
-            &headers,
+            items.iter().map(|item| {
+                (
+                    item.header.is_some(),
+                    item.row.as_ref().map(|row| row.agent.rows.len()),
+                )
+            }),
             self.config.agents.row_gap,
         );
         self.agent_scroll = super::scroll::list_scroll_start_to_reveal(
@@ -146,63 +151,57 @@ struct EndpointAgentRow {
     agent: super::agent_sidebar::AgentRow,
 }
 
-/// Rows of the expanded list with the space headers they are drawn under. Rendering and reveal
-/// both use this, so scroll positions are computed from the geometry that is drawn.
+/// Items of the expanded list: rows under the space headers they are drawn with. Rendering and
+/// reveal both use this, so scroll positions are computed from the geometry that is drawn.
 fn agent_list(
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
     agent_view_label: Option<&str>,
-) -> (
-    Vec<EndpointAgentRow>,
-    Vec<Option<super::agent_groups::AgentGroupHeader>>,
-) {
+) -> Vec<super::agent_groups::AgentListItem<EndpointAgentRow>> {
     let mut rows = agent_rows(endpoints, active_endpoint_id, config);
     let filtered =
         super::agent_filter::live_filter(config.agent_panel_filter.as_ref(), endpoints).is_some();
-    let headers = if !filtered && super::agent_groups::grouped_order(config, agent_view_label) {
-        let spaces = endpoints
+    let spaces = endpoints
+        .iter()
+        .filter_map(|endpoint| {
+            let snapshot = endpoint.snapshot.as_deref()?;
+            Some((
+                &endpoint.endpoint_id,
+                super::agent_filter::space_labels(snapshot),
+            ))
+        })
+        .collect::<Vec<_>>();
+    let name = |row: &EndpointAgentRow| {
+        spaces
             .iter()
-            .filter_map(|endpoint| {
-                let snapshot = endpoint.snapshot.as_deref()?;
-                Some((
-                    &endpoint.endpoint_id,
-                    super::agent_filter::space_labels(snapshot),
-                ))
+            .find(|(endpoint_id, _)| **endpoint_id == row.endpoint_id)
+            .map_or(row.agent.workspace_id.as_str(), |(_, spaces)| {
+                super::agent_filter::space_name(spaces, &row.agent.workspace_id)
             })
-            .collect::<Vec<_>>();
-        let name = |row: &EndpointAgentRow| {
-            spaces
-                .iter()
-                .find(|(endpoint_id, _)| **endpoint_id == row.endpoint_id)
-                .map_or(row.agent.workspace_id.as_str(), |(_, spaces)| {
-                    super::agent_filter::space_name(spaces, &row.agent.workspace_id)
-                })
-                .to_owned()
-        };
-        let starts =
-            super::agent_groups::group_starts(rows.iter().map(|row| (&row.endpoint_id, name(row))));
-        rows.iter()
-            .zip(starts)
-            .map(|(row, start)| {
-                start.then(|| super::agent_groups::AgentGroupHeader {
-                    // Spaces on different machines can share a name.
-                    label: format!("{} · {}", row.machine_label, name(row)),
-                    target: super::agent_filter::AgentPanelFilter {
-                        endpoint_id: row.endpoint_id.clone(),
-                        space: name(row),
-                    },
-                })
-            })
-            .collect::<Vec<_>>()
+            .to_owned()
+    };
+    let starts = if !filtered && super::agent_groups::grouped_order(config, agent_view_label) {
+        super::agent_groups::group_starts(rows.iter().map(|row| (&row.endpoint_id, name(row))))
     } else {
         Vec::new()
     };
-    if filtered || !headers.is_empty() {
+    if filtered || !starts.is_empty() {
         rows.iter_mut()
             .for_each(|row| row.agent.drop_space_only_rows());
     }
-    (rows, headers)
+    super::agent_groups::grouped_items(rows, &starts, |row, _| {
+        super::agent_groups::AgentGroupHeader {
+            // Spaces on different machines can share a name.
+            label: format!("{} · {}", row.machine_label, name(row)),
+            target: super::agent_filter::AgentPanelFilter {
+                endpoint_id: row.endpoint_id.clone(),
+                space: name(row),
+            },
+            // Folded space names are kept per machine; a list across machines offers none.
+            fold: None,
+        }
+    })
 }
 
 fn agent_rows(
@@ -239,7 +238,7 @@ fn agent_rows(
         active_endpoint_id,
         config.agent_panel_sort,
         config.agent_panel_filter.as_ref(),
-        config.tree_collapsed_spaces(),
+        config.local_list_order(),
     )
     .into_iter()
     .filter_map(|row| {

@@ -73,7 +73,8 @@ pub(super) struct ClientShellLayout {
 pub(super) enum ClientMobileTarget {
     Machine(ClientEndpointId),
     NewWorkspace,
-    /// Returns the Agents list to every space; the switcher has no chips to click.
+    /// Returns the Agents list to every space, unfolded; the switcher has no chips or headers
+    /// to click.
     ClearAgentFilter,
     Workspace {
         endpoint_id: ClientEndpointId,
@@ -904,8 +905,8 @@ pub(crate) struct ClientShellState {
     pub(super) workspace_scroll: usize,
     pub(super) agent_scroll: usize,
     pub(super) pending_agent_reveal: Option<(ClientEndpointId, String)>,
-    /// Agent pane the tree sidebar scrolls into view on its next frame.
-    pub(super) reveal_tree_agent: Option<String>,
+    /// Agent pane the expanded sidebar scrolls into view on its next frame.
+    pub(super) reveal_agent_pane: Option<String>,
     pub(super) tab_scroll: usize,
     pub(super) mobile_switcher_scroll: usize,
     pub(super) reveal_focused_workspace: bool,
@@ -1083,7 +1084,7 @@ impl ClientShellState {
             workspace_scroll: 0,
             agent_scroll: 0,
             pending_agent_reveal: None,
-            reveal_tree_agent: None,
+            reveal_agent_pane: None,
             tab_scroll: 0,
             mobile_switcher_scroll: 0,
             reveal_focused_workspace: true,

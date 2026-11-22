@@ -615,7 +615,7 @@ fn mobile_items(
         active_endpoint_id,
         config.agent_panel_sort,
         config.agent_panel_filter.as_ref(),
-        config.tree_collapsed_spaces(),
+        config.local_list_order(),
     );
     // The switcher has no chip strip, so it names the space a filter chosen in the sidebar
     // keeps and offers the way back to every space.
@@ -628,7 +628,7 @@ fn mobile_items(
             .map(|label| format!("agents · {label}"))
             .unwrap_or_else(|| "agents".to_owned());
         items.push(MobileItem::section(title, palette));
-        if filter_space.is_some() {
+        if filter_space.is_some() || !config.collapsed_spaces.is_empty() {
             items.push(MobileItem::action(
                 "  × show all spaces",
                 ClientMobileTarget::ClearAgentFilter,
@@ -1031,6 +1031,10 @@ impl ClientShellState {
             }
             Some(ClientMobileTarget::ClearAgentFilter) => {
                 self.config.agent_panel_filter = None;
+                if !self.config.collapsed_spaces.is_empty() {
+                    self.config.collapsed_spaces.clear();
+                    self.persist_chrome_preferences(outcome);
+                }
                 outcome.repaint = true;
             }
             Some(ClientMobileTarget::NewWorkspace) => {

@@ -1,8 +1,7 @@
 //! Space headers for the grouped Agents list.
 //!
-//! A header is drawn above the first agent of each run of agents from one space. It belongs to
-//! that agent's list item instead of being an item of its own, so item indices stay agent
-//! indices for scrolling, reveal, and indexed focus.
+//! A header is drawn above the first agent of each run of agents from one space and shares that
+//! agent's list item. A folded space keeps an item holding only its header.
 
 use super::agent_filter::AgentPanelFilter;
 use super::*;
@@ -11,6 +10,63 @@ pub(super) struct AgentGroupHeader {
     pub(super) label: String,
     /// Space the header names; clicking it narrows the panel to that space.
     pub(super) target: AgentPanelFilter,
+    /// Present where the space's agents can be folded away.
+    pub(super) fold: Option<GroupFold>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct GroupFold {
+    pub(super) collapsed: bool,
+    /// Agents in the space, shown while they are folded away.
+    pub(super) agents: usize,
+}
+
+/// One entry of the Agents list: a row, a row under the header that starts its space, or the
+/// header alone for a folded space.
+pub(super) struct AgentListItem<T> {
+    pub(super) header: Option<AgentGroupHeader>,
+    pub(super) row: Option<T>,
+}
+
+impl<T> AgentListItem<T> {
+    pub(super) fn plain(row: T) -> Self {
+        Self {
+            header: None,
+            row: Some(row),
+        }
+    }
+}
+
+/// Turns rows into list items with one header per run that `starts` marks. `header` sees the
+/// first row of a run and the run's length; when it reports the space as folded, the run's rows
+/// are dropped and the header stands alone.
+pub(super) fn grouped_items<T>(
+    rows: Vec<T>,
+    starts: &[bool],
+    mut header: impl FnMut(&T, usize) -> AgentGroupHeader,
+) -> Vec<AgentListItem<T>> {
+    if starts.is_empty() {
+        return rows.into_iter().map(AgentListItem::plain).collect();
+    }
+    let mut items = Vec::with_capacity(rows.len());
+    let mut rows = rows.into_iter().enumerate().peekable();
+    while let Some((_, first)) = rows.next() {
+        let mut run = vec![first];
+        while let Some((_, row)) = rows.next_if(|(index, _)| !starts[*index]) {
+            run.push(row);
+        }
+        let head = header(&run[0], run.len());
+        let folded = head.fold.is_some_and(|fold| fold.collapsed);
+        let mut run = run.into_iter();
+        items.push(AgentListItem {
+            header: Some(head),
+            row: run.next().filter(|_| !folded),
+        });
+        if !folded {
+            items.extend(run.map(AgentListItem::plain));
+        }
+    }
+    items
 }
 
 /// Whether the panel order keeps each space's agents together. Priority order and server-owned
@@ -61,30 +117,28 @@ pub(super) fn gather_by_rank<T>(items: &mut Vec<T>, ranks: Vec<usize>) {
     *items = ranked.into_iter().map(|(item, _)| item).collect();
 }
 
-/// Heights and trailing gaps of the list items. A header adds one row to the item it starts and
-/// keeps at least one blank row between it and the previous space.
+/// Heights and trailing gaps of the list items, each given as whether it has a header and how
+/// many lines its row takes. A header adds one line and is kept at least one blank line away
+/// from the rows of the space before it.
 pub(super) fn list_layout(
-    row_lines: impl Iterator<Item = usize>,
-    headers: &[Option<AgentGroupHeader>],
+    items: impl Iterator<Item = (bool, Option<usize>)>,
     row_gap: u16,
 ) -> (Vec<u16>, Vec<u16>) {
-    let starts = |index: usize| headers.get(index).is_some_and(Option::is_some);
-    let heights = row_lines
-        .enumerate()
-        .map(|(index, lines)| {
-            let lines = lines.clamp(1, usize::from(u16::MAX) - 1) as u16;
-            lines + u16::from(starts(index))
+    let items = items.collect::<Vec<_>>();
+    let heights = items
+        .iter()
+        .map(|(header, lines)| {
+            let lines = lines.map_or(0, |lines| lines.clamp(1, usize::from(u16::MAX) - 1) as u16);
+            lines + u16::from(*header)
         })
         .collect::<Vec<_>>();
-    let gaps = (0..heights.len())
-        .map(|index| {
-            if index + 1 == heights.len() {
-                0
-            } else if starts(index + 1) {
-                row_gap.max(1)
-            } else {
-                row_gap
-            }
+    let gaps = (0..items.len())
+        .map(|index| match (items[index], items.get(index + 1)) {
+            (_, None) => 0,
+            ((_, Some(_)), Some((true, _))) => row_gap.max(1),
+            // Folded spaces stack without the blank line a list of rows needs.
+            ((_, None), Some((true, _))) => 0,
+            (_, Some((false, _))) => row_gap,
         })
         .collect();
     (heights, gaps)
@@ -94,14 +148,18 @@ pub(super) fn list_layout(
 mod tests {
     use super::*;
 
-    fn header() -> Option<AgentGroupHeader> {
-        Some(AgentGroupHeader {
+    fn header(collapsed: bool) -> AgentGroupHeader {
+        AgentGroupHeader {
             label: "space".into(),
             target: AgentPanelFilter {
                 endpoint_id: ClientEndpointId::Local,
                 space: "space".into(),
             },
-        })
+            fold: Some(GroupFold {
+                collapsed,
+                agents: 0,
+            }),
+        }
     }
 
     #[test]
@@ -130,10 +188,10 @@ mod tests {
     }
 
     #[test]
-    fn header_adds_a_row_and_separates_spaces() {
-        let headers = [header(), None, header()];
+    fn header_adds_a_line_and_separates_spaces() {
+        let items = [(true, Some(2)), (false, Some(2)), (true, Some(1))];
 
-        let (heights, gaps) = list_layout([2, 2, 1].into_iter(), &headers, 0);
+        let (heights, gaps) = list_layout(items.into_iter(), 0);
 
         assert_eq!(heights, [3, 2, 2]);
         assert_eq!(gaps, [0, 1, 0]);
@@ -141,9 +199,44 @@ mod tests {
 
     #[test]
     fn layout_without_headers_matches_the_plain_list() {
-        let (heights, gaps) = list_layout([2, 0, 1].into_iter(), &[], 1);
+        let items = [(false, Some(2)), (false, Some(0)), (false, Some(1))];
+
+        let (heights, gaps) = list_layout(items.into_iter(), 1);
 
         assert_eq!(heights, [2, 1, 1]);
         assert_eq!(gaps, [1, 1, 0]);
+    }
+
+    #[test]
+    fn folded_spaces_take_one_line_each_and_stack() {
+        let items = [(true, None), (true, None), (true, Some(1))];
+
+        let (heights, gaps) = list_layout(items.into_iter(), 0);
+
+        assert_eq!(heights, [1, 1, 2]);
+        assert_eq!(gaps, [0, 0, 0]);
+    }
+
+    #[test]
+    fn folded_run_keeps_its_header_and_drops_its_rows() {
+        let rows = vec!["a1", "a2", "b1"];
+        let starts = group_starts(rows.iter().map(|row| &row[..1]));
+
+        let items = grouped_items(rows, &starts, |row, _| header(row.starts_with('a')));
+
+        let shape = items
+            .iter()
+            .map(|item| (item.header.is_some(), item.row))
+            .collect::<Vec<_>>();
+        assert_eq!(shape, [(true, None), (true, Some("b1"))]);
+    }
+
+    #[test]
+    fn rows_without_groups_become_plain_items() {
+        let items = grouped_items(vec!["a1", "a2"], &[], |_, _| header(false));
+
+        assert!(items
+            .iter()
+            .all(|item| item.header.is_none() && item.row.is_some()));
     }
 }

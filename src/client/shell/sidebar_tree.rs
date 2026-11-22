@@ -49,7 +49,6 @@ fn tree_entries<'a>(
     filter: Option<&AgentPanelFilter>,
 ) -> Vec<TreeEntry<'a>> {
     // Every agent the list could show, so a collapsed space can still say how many it hides.
-    let nothing_collapsed = HashSet::new();
     let now_ms = crate::agent_state_time::unix_ms_now();
     let mut agents = agent_sidebar::ordered_agent_pane_ids_among(
         snapshot,
@@ -57,7 +56,8 @@ fn tree_entries<'a>(
         AgentListOrder {
             sort: config.agent_panel_sort,
             space: filter.map(|filter| filter.space.as_str()),
-            tree: Some(&nothing_collapsed),
+            collapsed: None,
+            tree: true,
         },
     )
     .into_iter()
@@ -221,7 +221,7 @@ pub(super) fn render(
     if !body.is_empty() {
         let reveal_space = std::mem::take(state.reveal_focused_workspace)
             | std::mem::take(state.reveal_navigation_workspace);
-        let reveal_agent = state.reveal_tree_agent.take();
+        let reveal_agent = state.reveal_agent_pane.take();
         let navigating = entries
             .iter()
             .any(|entry| matches!(entry, TreeEntry::Space(group, _) if group.selected));

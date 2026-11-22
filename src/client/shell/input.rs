@@ -995,7 +995,7 @@ impl ClientShellState {
                     &self.active_endpoint_id,
                     self.config.agent_panel_sort,
                     self.config.agent_panel_filter.as_ref(),
-                    self.config.tree_collapsed_spaces(),
+                    self.config.local_list_order(),
                 )
                 .get(*index)
                 .is_some()

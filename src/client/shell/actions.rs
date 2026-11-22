@@ -860,8 +860,9 @@ impl ClientShellState {
         (repaint, Vec::new())
     }
 
-    /// The server orders agents without the client-local space filter or tree arrangement, so an
-    /// agent action this client's list cannot resolve must not fall through to the server's list.
+    /// The server orders agents without the client-local space filter, folded spaces, or tree
+    /// arrangement, so an agent action this client's list cannot resolve must not fall through
+    /// to the server's list.
     fn agent_action_stays_in_filtered_list(&self, action: crate::input::KeybindAction) -> bool {
         use crate::input::KeybindAction;
 
@@ -869,7 +870,7 @@ impl ClientShellState {
             action,
             KeybindAction::FocusAgent(_) | KeybindAction::PreviousAgent | KeybindAction::NextAgent
         ) && self.snapshot.as_deref().is_some_and(|snapshot| {
-            self.config.sidebar_tree
+            self.config.local_list_order().is_some()
                 || self
                     .config
                     .agent_filter_space(&self.active_endpoint_id, snapshot)
@@ -947,12 +948,9 @@ impl ClientShellState {
                     .iter()
                     .any(|(_, visible_pane_id)| visible_pane_id == &pane_id)
                 {
-                    if self.config.sidebar_tree {
-                        // Tree entries include space rows, so the list finds the agent itself.
-                        self.reveal_tree_agent = Some(pane_id.clone());
-                    } else {
-                        self.agent_scroll = next.min(self.hits.agent_max_scroll);
-                    }
+                    // List items include headers and folded spaces, so the list finds the
+                    // agent's own item on its next frame.
+                    self.reveal_agent_pane = Some(pane_id.clone());
                 }
                 Some(Method::PaneFocus(PaneTarget { pane_id }))
             }

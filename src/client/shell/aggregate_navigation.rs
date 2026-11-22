@@ -58,19 +58,20 @@ pub(super) fn aggregate_agent_rows<'a>(
     active_endpoint_id: &ClientEndpointId,
     sort: crate::config::AgentPanelSortConfig,
     filter: Option<&super::agent_filter::AgentPanelFilter>,
-    tree: Option<&HashSet<String>>,
+    local: Option<super::agent_sidebar::LocalListOrder<'_>>,
 ) -> Vec<AggregateAgentRow<'a>> {
     let filter = super::agent_filter::live_filter(filter, endpoints);
-    // The tree sidebar only arranges a single machine; its order is that machine's own.
-    if let (Some(collapsed), Some(endpoint), 1) = (
-        tree,
+    // Folding and the tree sidebar only apply to a single machine, whose order is its own.
+    if let (Some(local), Some(endpoint), 1) = (
+        local,
         cached_endpoint_snapshots(endpoints).next(),
         endpoints.len(),
     ) {
         let order = super::agent_sidebar::AgentListOrder {
             sort,
             space: filter.map(|filter| filter.space.as_str()),
-            tree: Some(collapsed),
+            collapsed: Some(local.collapsed),
+            tree: local.tree,
         };
         return super::agent_sidebar::ordered_agent_pane_ids(endpoint.snapshot, order)
             .into_iter()
@@ -193,7 +194,8 @@ pub(super) fn aggregate_agent_rows<'a>(
                 super::agent_sidebar::AgentListOrder {
                     sort,
                     space: None,
-                    tree: None,
+                    collapsed: None,
+                    tree: false,
                 },
             )
             .into_iter()
@@ -351,9 +353,9 @@ pub(super) fn online_agent_targets(
     active_endpoint_id: &ClientEndpointId,
     sort: crate::config::AgentPanelSortConfig,
     filter: Option<&super::agent_filter::AgentPanelFilter>,
-    tree: Option<&HashSet<String>>,
+    local: Option<super::agent_sidebar::LocalListOrder<'_>>,
 ) -> Vec<AggregateAgentTarget> {
-    aggregate_agent_rows(endpoints, active_endpoint_id, sort, filter, tree)
+    aggregate_agent_rows(endpoints, active_endpoint_id, sort, filter, local)
         .into_iter()
         .filter(|row| !row.endpoint.stale())
         .map(|row| AggregateAgentTarget {
