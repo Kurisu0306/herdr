@@ -13,42 +13,45 @@ const PANEL_TITLE_ROWS: u16 = 2;
 /// Rows the Agents list starts below the panel top when no chips are drawn.
 pub(super) const AGENT_LIST_OFFSET: u16 = 3;
 
-/// One space the Agents panel is narrowed to.
+/// Spaces in Spaces-panel order, each with the name that panel lists it under.
+pub(super) type SpaceLabels<'a> = Vec<(&'a ClientShellWorkspace, &'a str)>;
+
+/// The space the Agents panel is narrowed to: every workspace on one machine that is listed
+/// under `space`. Workspaces opened on the same directory share a name, and the user thinks of
+/// them as one project, so the name is the identity rather than a single workspace.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct AgentPanelFilter {
     pub(super) endpoint_id: ClientEndpointId,
-    pub(super) workspace_id: String,
+    pub(super) space: String,
 }
 
 impl AgentPanelFilter {
-    /// The workspace this filter keeps inside `snapshot`.
+    /// The space name this filter keeps among one machine's `spaces`.
     ///
     /// A filter naming another machine or a space that has since closed is inert, so a stale
     /// choice shows every agent instead of an empty panel nobody can explain.
-    pub(super) fn workspace_in<'a>(
+    pub(super) fn space_among<'a>(
         &'a self,
         endpoint_id: &ClientEndpointId,
-        snapshot: &ClientShellSnapshot,
+        spaces: &[(&ClientShellWorkspace, &str)],
     ) -> Option<&'a str> {
-        (&self.endpoint_id == endpoint_id
-            && snapshot
-                .workspaces
-                .iter()
-                .any(|workspace| workspace.workspace_id == self.workspace_id))
-        .then_some(self.workspace_id.as_str())
+        (&self.endpoint_id == endpoint_id && spaces.iter().any(|(_, name)| *name == self.space))
+            .then_some(self.space.as_str())
     }
 }
 
 impl ClientShellConfig {
-    /// Workspace the Agents panel is narrowed to inside one machine's snapshot.
-    pub(super) fn agent_filter_workspace(
+    /// Space name the Agents panel is narrowed to inside one machine's snapshot.
+    pub(super) fn agent_filter_space(
         &self,
         endpoint_id: &ClientEndpointId,
         snapshot: &ClientShellSnapshot,
     ) -> Option<&str> {
-        self.agent_panel_filter
-            .as_ref()?
-            .workspace_in(endpoint_id, snapshot)
+        let filter = self.agent_panel_filter.as_ref()?;
+        if &filter.endpoint_id != endpoint_id {
+            return None;
+        }
+        filter.space_among(endpoint_id, &space_labels(snapshot))
     }
 }
 
@@ -58,41 +61,27 @@ pub(super) fn live_filter<'a>(
     endpoints: &[ClientShellEndpoint],
 ) -> Option<&'a AgentPanelFilter> {
     filter.filter(|filter| {
-        endpoints.iter().any(|endpoint| {
-            endpoint.snapshot.as_deref().is_some_and(|snapshot| {
+        endpoints
+            .iter()
+            .filter(|endpoint| endpoint.endpoint_id == filter.endpoint_id)
+            .filter_map(|endpoint| endpoint.snapshot.as_deref())
+            .any(|snapshot| {
                 filter
-                    .workspace_in(&endpoint.endpoint_id, snapshot)
+                    .space_among(&filter.endpoint_id, &space_labels(snapshot))
                     .is_some()
             })
-        })
     })
-}
-
-/// Label of the space a live filter names, for surfaces that cannot draw the chip strip.
-pub(super) fn live_filter_label<'a>(
-    filter: Option<&AgentPanelFilter>,
-    endpoints: &'a [ClientShellEndpoint],
-) -> Option<&'a str> {
-    let filter = filter?;
-    endpoints
-        .iter()
-        .filter(|endpoint| endpoint.endpoint_id == filter.endpoint_id)
-        .filter_map(|endpoint| endpoint.snapshot.as_deref())
-        .flat_map(|snapshot| snapshot.workspaces.iter())
-        .find(|workspace| workspace.workspace_id == filter.workspace_id)
-        .map(|workspace| workspace.label.as_str())
 }
 
 pub(super) struct AgentFilterChip<'a> {
     endpoint_id: &'a ClientEndpointId,
-    workspace_id: &'a str,
-    label: &'a str,
-    /// Rolled-up agent state of the space, as the Spaces panel shows it.
+    space: &'a str,
+    /// Most urgent rolled-up agent state among the workspaces sharing this name.
     status: crate::api::schema::AgentStatus,
+    populated: bool,
 }
 
-/// Spaces in Spaces-panel order, each with the name that panel lists it under.
-pub(super) fn space_labels(snapshot: &ClientShellSnapshot) -> Vec<(&ClientShellWorkspace, &str)> {
+pub(super) fn space_labels(snapshot: &ClientShellSnapshot) -> SpaceLabels<'_> {
     super::render::workspace_entries(snapshot, &HashSet::new())
         .into_iter()
         .filter_map(|entry| {
@@ -105,16 +94,28 @@ pub(super) fn space_labels(snapshot: &ClientShellSnapshot) -> Vec<(&ClientShellW
         .collect()
 }
 
-/// One chip per space that has agents, in the order and with the labels the Spaces panel uses.
+/// Name the workspace is listed under, falling back to its id for a workspace `spaces` lacks.
+pub(super) fn space_name<'a>(
+    spaces: &[(&ClientShellWorkspace, &'a str)],
+    workspace_id: &'a str,
+) -> &'a str {
+    spaces
+        .iter()
+        .find(|(workspace, _)| workspace.workspace_id == workspace_id)
+        .map_or(workspace_id, |(_, name)| name)
+}
+
+/// One chip per space name that has agents, in Spaces-panel order.
 ///
 /// The selected space keeps its chip after its last agent leaves, so the filter that empties the
 /// list stays visible and can be clicked off.
 pub(super) fn snapshot_chips<'a>(
     endpoint_id: &'a ClientEndpointId,
     snapshot: &'a ClientShellSnapshot,
+    spaces: &[(&'a ClientShellWorkspace, &'a str)],
     active: Option<&AgentPanelFilter>,
 ) -> Vec<AgentFilterChip<'a>> {
-    let selected = active.and_then(|filter| filter.workspace_in(endpoint_id, snapshot));
+    let selected = active.and_then(|filter| filter.space_among(endpoint_id, spaces));
     if selected.is_none() && snapshot.agents.is_empty() {
         return Vec::new();
     }
@@ -123,19 +124,26 @@ pub(super) fn snapshot_chips<'a>(
         .iter()
         .map(|agent| agent.workspace_id.as_str())
         .collect::<HashSet<_>>();
-    space_labels(snapshot)
-        .into_iter()
-        .filter(|(workspace, _)| {
-            let workspace_id = workspace.workspace_id.as_str();
-            populated.contains(workspace_id) || selected == Some(workspace_id)
-        })
-        .map(|(workspace, label)| AgentFilterChip {
-            endpoint_id,
-            workspace_id: &workspace.workspace_id,
-            label,
-            status: workspace.agent_status,
-        })
-        .collect()
+    let mut chips = Vec::<AgentFilterChip<'a>>::new();
+    for (workspace, space) in spaces {
+        let populated = populated.contains(workspace.workspace_id.as_str());
+        match chips.iter_mut().find(|chip| chip.space == *space) {
+            Some(chip) => {
+                chip.populated |= populated;
+                if status_priority(workspace.agent_status) > status_priority(chip.status) {
+                    chip.status = workspace.agent_status;
+                }
+            }
+            None => chips.push(AgentFilterChip {
+                endpoint_id,
+                space,
+                status: workspace.agent_status,
+                populated,
+            }),
+        }
+    }
+    chips.retain(|chip| chip.populated || selected == Some(chip.space));
+    chips
 }
 
 pub(super) fn endpoint_chips<'a>(
@@ -145,10 +153,14 @@ pub(super) fn endpoint_chips<'a>(
     endpoints
         .iter()
         .filter_map(|endpoint| {
-            endpoint
-                .snapshot
-                .as_deref()
-                .map(|snapshot| snapshot_chips(&endpoint.endpoint_id, snapshot, active))
+            endpoint.snapshot.as_deref().map(|snapshot| {
+                snapshot_chips(
+                    &endpoint.endpoint_id,
+                    snapshot,
+                    &space_labels(snapshot),
+                    active,
+                )
+            })
         })
         .flatten()
         .collect()
@@ -276,7 +288,7 @@ pub(super) fn render_chips<'a>(
     }
     let row_width = area.width.saturating_sub(1);
     let labels = std::iter::once(ALL_LABEL)
-        .chain(chips.iter().map(|chip| chip.label))
+        .chain(chips.iter().map(|chip| chip.space))
         .map(|label| format!(" {} ", crate::ui::truncate_end(label, CHIP_LABEL_MAX_WIDTH)))
         .collect::<Vec<_>>();
     let widths = labels
@@ -286,7 +298,7 @@ pub(super) fn render_chips<'a>(
     let active_index = active
         .and_then(|filter| {
             chips.iter().position(|chip| {
-                chip.endpoint_id == &filter.endpoint_id && chip.workspace_id == filter.workspace_id
+                chip.endpoint_id == &filter.endpoint_id && chip.space == filter.space
             })
         })
         .map_or(0, |position| position + 1);
@@ -331,7 +343,7 @@ pub(super) fn render_chips<'a>(
         if config.mouse_capture {
             let target = chip.map(|chip| AgentPanelFilter {
                 endpoint_id: chip.endpoint_id.clone(),
-                workspace_id: chip.workspace_id.to_owned(),
+                space: chip.space.to_owned(),
             });
             hits.agent_filter_chips.push((rect, target));
         }

@@ -60,11 +60,21 @@ pub(super) fn aggregate_agent_rows<'a>(
     filter: Option<&super::agent_filter::AgentPanelFilter>,
 ) -> Vec<AggregateAgentRow<'a>> {
     let filter = super::agent_filter::live_filter(filter, endpoints);
+    let filter_spaces = filter
+        .and_then(|filter| {
+            endpoints
+                .iter()
+                .find(|endpoint| endpoint.endpoint_id == filter.endpoint_id)
+        })
+        .and_then(|endpoint| endpoint.snapshot.as_deref())
+        .map(super::agent_filter::space_labels)
+        .unwrap_or_default();
     let keep_filtered = |rows: &mut Vec<AggregateAgentRow<'a>>| {
         if let Some(filter) = filter {
             rows.retain(|row| {
                 row.endpoint.endpoint_id == &filter.endpoint_id
-                    && row.agent.workspace_id == filter.workspace_id
+                    && super::agent_filter::space_name(&filter_spaces, &row.agent.workspace_id)
+                        == filter.space
             });
         }
     };
@@ -137,6 +147,9 @@ pub(super) fn aggregate_agent_rows<'a>(
                 return rows;
             }
         }
+        if view.is_none() {
+            gather_same_named_spaces(&mut rows, sort);
+        }
         sort_aggregate_rows(&mut rows, sort);
         return rows;
     }
@@ -166,6 +179,28 @@ pub(super) fn aggregate_agent_rows<'a>(
     keep_filtered(&mut rows);
     sort_aggregate_rows(&mut rows, sort);
     rows
+}
+
+/// Keeps each machine's same-named spaces together in the grouped order, as the per-machine
+/// order does.
+fn gather_same_named_spaces(
+    rows: &mut Vec<AggregateAgentRow<'_>>,
+    sort: crate::config::AgentPanelSortConfig,
+) {
+    if sort != crate::config::AgentPanelSortConfig::Spaces || rows.len() < 2 {
+        return;
+    }
+    let mut spaces = HashMap::new();
+    let ranks = super::agent_groups::first_appearance_ranks(rows.iter().map(|row| {
+        let spaces = spaces
+            .entry(row.endpoint.endpoint_index)
+            .or_insert_with(|| super::agent_filter::space_labels(row.endpoint.snapshot));
+        (
+            row.endpoint.endpoint_index,
+            super::agent_filter::space_name(spaces, &row.agent.workspace_id).to_owned(),
+        )
+    }));
+    super::agent_groups::gather_by_rank(rows, ranks);
 }
 
 fn sort_aggregate_rows(

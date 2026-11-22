@@ -63,14 +63,12 @@ fn listed_agents(state: &ClientShellState) -> Vec<&str> {
         .collect()
 }
 
-fn chip_rect(state: &ClientShellState, workspace_id: Option<&str>) -> Rect {
+fn chip_rect(state: &ClientShellState, space: Option<&str>) -> Rect {
     state
         .hits
         .agent_filter_chips
         .iter()
-        .find(|(_, target)| {
-            target.as_ref().map(|target| target.workspace_id.as_str()) == workspace_id
-        })
+        .find(|(_, target)| target.as_ref().map(|target| target.space.as_str()) == space)
         .map(|(rect, _)| *rect)
         .expect("space chip")
 }
@@ -92,7 +90,7 @@ fn space_chip_narrows_the_agent_list_without_asking_the_server() {
     assert_eq!(state.hits.agent_filter_chips.len(), 3);
     assert_eq!(listed_agents(&state), ["pane_1", "pane_2"]);
 
-    let chip = chip_rect(&state, Some("ws_2"));
+    let chip = chip_rect(&state, Some("second"));
     let outcome = click(&mut state, chip);
 
     assert!(outcome.repaint);
@@ -102,9 +100,9 @@ fn space_chip_narrows_the_agent_list_without_asking_the_server() {
 
 #[test]
 fn selected_chip_and_all_chip_both_restore_every_space() {
-    for restore in [Some("ws_2"), None] {
+    for restore in [Some("second"), None] {
         let mut state = two_space_state();
-        let chip = chip_rect(&state, Some("ws_2"));
+        let chip = chip_rect(&state, Some("second"));
         click(&mut state, chip);
         assert_eq!(listed_agents(&state), ["pane_2"]);
 
@@ -119,7 +117,7 @@ fn selected_chip_and_all_chip_both_restore_every_space() {
 #[test]
 fn keyboard_agent_navigation_follows_the_filtered_list() {
     let mut state = two_space_state();
-    let chip = chip_rect(&state, Some("ws_2"));
+    let chip = chip_rect(&state, Some("second"));
     click(&mut state, chip);
 
     let mut first = ClientShellInput::default();
@@ -148,7 +146,7 @@ fn keyboard_agent_navigation_follows_the_filtered_list() {
 #[test]
 fn collapsed_sidebar_lists_only_the_selected_space() {
     let mut state = two_space_state();
-    let chip = chip_rect(&state, Some("ws_2"));
+    let chip = chip_rect(&state, Some("second"));
     click(&mut state, chip);
 
     state.sidebar_collapsed = true;
@@ -167,7 +165,7 @@ fn filter_for_a_closed_space_shows_every_agent() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.config.agent_panel_filter = Some(super::super::agent_filter::AgentPanelFilter {
         endpoint_id: ClientEndpointId::Local,
-        workspace_id: "ws_2".into(),
+        space: "second".into(),
     });
     state.set_snapshot(Box::new(remaining));
     state.set_pane_surface(surface());
@@ -207,7 +205,7 @@ fn chips_need_the_mouse_unless_a_filter_is_active() {
 
     state.config.agent_panel_filter = Some(super::super::agent_filter::AgentPanelFilter {
         endpoint_id: ClientEndpointId::Local,
-        workspace_id: "ws_2".into(),
+        space: "second".into(),
     });
     let frame = state.compose(106, 30).expect("agent sidebar frame");
 
@@ -230,7 +228,7 @@ fn selected_space_without_agents_keeps_its_chip_and_explains_the_empty_list() {
 
     state.config.agent_panel_filter = Some(super::super::agent_filter::AgentPanelFilter {
         endpoint_id: ClientEndpointId::Local,
-        workspace_id: "ws_2".into(),
+        space: "second".into(),
     });
     let frame = state.compose(106, 30).expect("agent sidebar frame");
     assert!(listed_agents(&state).is_empty());
@@ -239,18 +237,18 @@ fn selected_space_without_agents_keeps_its_chip_and_explains_the_empty_list() {
         .any(|row| row.contains("no matching agents")));
 
     let all = chip_rect(&state, None);
-    chip_rect(&state, Some("ws_2"));
+    chip_rect(&state, Some("second"));
     click(&mut state, all);
 
     assert_eq!(listed_agents(&state), ["pane_1"]);
 }
 
-fn header_rect(state: &ClientShellState, workspace_id: &str) -> Rect {
+fn header_rect(state: &ClientShellState, space: &str) -> Rect {
     state
         .hits
         .agent_group_headers
         .iter()
-        .find(|(_, target)| target.workspace_id == workspace_id)
+        .find(|(_, target)| target.space == space)
         .map(|(rect, _)| *rect)
         .expect("space header")
 }
@@ -279,8 +277,8 @@ fn grouped_list_names_each_space_above_its_agents() {
     let frame = state.compose(106, 30).expect("agent sidebar frame");
     let rows = frame_rows(&frame);
 
-    let first = header_rect(&state, "ws_1");
-    let second = header_rect(&state, "ws_2");
+    let first = header_rect(&state, "client-shell");
+    let second = header_rect(&state, "second");
     assert_eq!(state.hits.agent_group_headers.len(), 2);
     assert!(rows[first.y as usize].contains(" client-shell"));
     assert!(rows[second.y as usize].contains(" second"));
@@ -293,7 +291,7 @@ fn grouped_list_names_each_space_above_its_agents() {
 #[test]
 fn clicking_a_space_header_selects_that_space() {
     let mut state = two_space_state();
-    let header = header_rect(&state, "ws_2");
+    let header = header_rect(&state, "second");
 
     let outcome = click(&mut state, header);
 
@@ -363,12 +361,108 @@ fn chip_of_a_space_needing_attention_uses_its_status_color() {
     let buffer = frame.to_ratatui_buffer().expect("buffer");
     let palette = &state.config.palette;
 
-    let blocked = cell_symbol_position(&frame, chip_rect(&state, Some("ws_2")), "second");
-    let calm = cell_symbol_position(&frame, chip_rect(&state, Some("ws_1")), "client-shell");
+    let blocked = cell_symbol_position(&frame, chip_rect(&state, Some("second")), "second");
+    let calm = cell_symbol_position(
+        &frame,
+        chip_rect(&state, Some("client-shell")),
+        "client-shell",
+    );
 
     assert_eq!(
         buffer[blocked].fg,
         super::super::status_color(AgentStatus::Blocked, palette)
     );
     assert_eq!(buffer[calm].fg, palette.overlay0);
+}
+
+/// `client-shell`, `second`, and another `client-shell` opened on the same directory.
+fn split_project_snapshot() -> ClientShellSnapshot {
+    let mut projected = two_space_snapshot();
+    let mut third = projected.workspaces[0].clone();
+    third.workspace_id = "ws_3".into();
+    third.active_tab_id = "tab_3".into();
+    third.number = 3;
+    third.focused = false;
+    projected.workspaces.push(third);
+    let mut third_tab = projected.tabs[0].clone();
+    third_tab.tab_id = "tab_3".into();
+    third_tab.workspace_id = "ws_3".into();
+    third_tab.focused = false;
+    projected.tabs.push(third_tab);
+    let mut third_pane = projected.panes[0].clone();
+    third_pane.pane_id = "pane_3".into();
+    third_pane.workspace_id = "ws_3".into();
+    third_pane.tab_id = "tab_3".into();
+    third_pane.focused = false;
+    projected.panes.push(third_pane);
+    projected
+        .agents
+        .push(space_agent("pane_3", "ws_3", "tab_3", false));
+    projected
+}
+
+#[test]
+fn same_named_spaces_are_one_group() {
+    let mut state = composed(&Config::default(), split_project_snapshot());
+
+    // One chip and one header per name, with the separated workspaces gathered together.
+    assert_eq!(state.hits.agent_filter_chips.len(), 3);
+    assert_eq!(state.hits.agent_group_headers.len(), 2);
+    assert_eq!(listed_agents(&state), ["pane_1", "pane_3", "pane_2"]);
+    assert_eq!(
+        agent_rect(&state, "pane_3").y,
+        agent_rect(&state, "pane_1").bottom()
+    );
+
+    let chip = chip_rect(&state, Some("client-shell"));
+    click(&mut state, chip);
+    assert_eq!(listed_agents(&state), ["pane_1", "pane_3"]);
+
+    let mut second = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::FocusAgent(1)),
+        &mut second,
+    );
+    assert!(matches!(
+        &second.actions[..],
+        [ClientShellAction::Endpoint { request, .. }]
+            if matches!(
+                &request.method,
+                crate::api::schema::Method::PaneFocus(target) if target.pane_id == "pane_3"
+            )
+    ));
+}
+
+#[test]
+fn merged_chip_shows_the_most_urgent_space() {
+    let mut projected = split_project_snapshot();
+    projected.workspaces[2].agent_status = AgentStatus::Blocked;
+    projected.agents[2].agent_status = AgentStatus::Blocked;
+    let mut state = composed(&Config::default(), projected);
+    let frame = state.compose(106, 30).expect("agent sidebar frame");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+
+    let merged = cell_symbol_position(
+        &frame,
+        chip_rect(&state, Some("client-shell")),
+        "client-shell",
+    );
+
+    assert_eq!(
+        buffer[merged].fg,
+        super::super::status_color(AgentStatus::Blocked, &state.config.palette)
+    );
+}
+
+#[test]
+fn priority_order_does_not_gather_same_named_spaces() {
+    let mut projected = split_project_snapshot();
+    projected.agents[1].state_change_seq = 9;
+    projected.agents[2].state_change_seq = 5;
+    let mut config = Config::default();
+    config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
+
+    let state = composed(&config, projected);
+
+    assert_eq!(listed_agents(&state), ["pane_2", "pane_3", "pane_1"]);
 }

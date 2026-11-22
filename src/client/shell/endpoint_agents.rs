@@ -158,41 +158,44 @@ fn agent_list(
     let mut rows = agent_rows(endpoints, active_endpoint_id, config);
     let filtered =
         super::agent_filter::live_filter(config.agent_panel_filter.as_ref(), endpoints).is_some();
-    let starts = if !filtered && super::agent_groups::grouped_order(config, agent_view_label) {
-        super::agent_groups::group_starts(
-            rows.iter()
-                .map(|row| (&row.endpoint_id, &row.agent.workspace_id)),
-        )
+    let headers = if !filtered && super::agent_groups::grouped_order(config, agent_view_label) {
+        let spaces = endpoints
+            .iter()
+            .filter_map(|endpoint| {
+                let snapshot = endpoint.snapshot.as_deref()?;
+                Some((
+                    &endpoint.endpoint_id,
+                    super::agent_filter::space_labels(snapshot),
+                ))
+            })
+            .collect::<Vec<_>>();
+        let name = |row: &EndpointAgentRow| {
+            spaces
+                .iter()
+                .find(|(endpoint_id, _)| **endpoint_id == row.endpoint_id)
+                .map_or(row.agent.workspace_id.as_str(), |(_, spaces)| {
+                    super::agent_filter::space_name(spaces, &row.agent.workspace_id)
+                })
+                .to_owned()
+        };
+        let starts =
+            super::agent_groups::group_starts(rows.iter().map(|row| (&row.endpoint_id, name(row))));
+        rows.iter()
+            .zip(starts)
+            .map(|(row, start)| {
+                start.then(|| super::agent_groups::AgentGroupHeader {
+                    // Spaces on different machines can share a name.
+                    label: format!("{} · {}", row.machine_label, name(row)),
+                    target: super::agent_filter::AgentPanelFilter {
+                        endpoint_id: row.endpoint_id.clone(),
+                        space: name(row),
+                    },
+                })
+            })
+            .collect::<Vec<_>>()
     } else {
         Vec::new()
     };
-    let headers = rows
-        .iter()
-        .zip(starts)
-        .map(|(row, start)| {
-            start.then(|| {
-                let space = endpoints
-                    .iter()
-                    .find(|endpoint| endpoint.endpoint_id == row.endpoint_id)
-                    .and_then(|endpoint| endpoint.snapshot.as_deref())
-                    .and_then(|snapshot| {
-                        super::agent_filter::space_labels(snapshot)
-                            .into_iter()
-                            .find(|(workspace, _)| workspace.workspace_id == row.agent.workspace_id)
-                            .map(|(_, label)| label)
-                    })
-                    .unwrap_or(&row.agent.workspace_id);
-                super::agent_groups::AgentGroupHeader {
-                    // Spaces on different machines can share a name.
-                    label: format!("{} · {space}", row.machine_label),
-                    target: super::agent_filter::AgentPanelFilter {
-                        endpoint_id: row.endpoint_id.clone(),
-                        workspace_id: row.agent.workspace_id.clone(),
-                    },
-                }
-            })
-        })
-        .collect::<Vec<_>>();
     if filtered || !headers.is_empty() {
         rows.iter_mut()
             .for_each(|row| row.agent.drop_space_only_rows());

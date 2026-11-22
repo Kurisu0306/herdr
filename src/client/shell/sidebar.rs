@@ -131,7 +131,7 @@ pub(crate) fn render_collapsed_sidebar(
     for (index, pane_id) in super::ordered_agent_pane_ids(
         snapshot,
         config.agent_panel_sort,
-        config.agent_filter_workspace(endpoint_id, snapshot),
+        config.agent_filter_space(endpoint_id, snapshot),
     )
     .into_iter()
     .take(detail_content.height as usize)

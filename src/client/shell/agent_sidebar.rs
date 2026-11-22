@@ -29,14 +29,38 @@ impl AgentRow {
     }
 }
 
-/// Agent panes in panel order, optionally narrowed to one workspace of `snapshot`.
+/// Agent panes in panel order, optionally narrowed to the spaces named `space`.
 pub(super) fn ordered_agent_pane_ids(
     snapshot: &ClientShellSnapshot,
     sort: crate::config::AgentPanelSortConfig,
-    workspace_id: Option<&str>,
+    space: Option<&str>,
 ) -> Vec<String> {
+    // Space names are only needed to match a filter or to gather same-named spaces.
+    let gathers = sort == crate::config::AgentPanelSortConfig::Spaces
+        && snapshot.agent_view_label.is_none()
+        && snapshot.agents.len() > 1;
+    let spaces = if space.is_some() || gathers {
+        super::agent_filter::space_labels(snapshot)
+    } else {
+        Vec::new()
+    };
+    ordered_agent_pane_ids_among(snapshot, sort, &spaces, space)
+}
+
+/// [`ordered_agent_pane_ids`] for a caller that already resolved the snapshot's space names.
+pub(super) fn ordered_agent_pane_ids_among(
+    snapshot: &ClientShellSnapshot,
+    sort: crate::config::AgentPanelSortConfig,
+    spaces: &[(&ClientShellWorkspace, &str)],
+    space: Option<&str>,
+) -> Vec<String> {
+    let name = |agent: &crate::protocol::ClientShellAgent| {
+        super::agent_filter::space_name(spaces, &agent.workspace_id).to_owned()
+    };
     let kept = |agent: &&crate::protocol::ClientShellAgent| {
-        workspace_id.is_none_or(|workspace_id| agent.workspace_id == workspace_id)
+        space.is_none_or(|space| {
+            super::agent_filter::space_name(spaces, &agent.workspace_id) == space
+        })
     };
     if snapshot.agent_view_label.is_some() {
         return snapshot
@@ -53,13 +77,19 @@ pub(super) fn ordered_agent_pane_ids(
             .collect();
     }
     let mut agents = snapshot.agents.iter().filter(kept).collect::<Vec<_>>();
-    if sort == crate::config::AgentPanelSortConfig::Priority {
-        agents.sort_by_key(|agent| {
+    match sort {
+        crate::config::AgentPanelSortConfig::Priority => agents.sort_by_key(|agent| {
             (
                 std::cmp::Reverse(status_priority(agent.agent_status)),
                 std::cmp::Reverse(agent.state_change_seq),
             )
-        });
+        }),
+        crate::config::AgentPanelSortConfig::Spaces if space.is_none() => {
+            let ranks =
+                super::agent_groups::first_appearance_ranks(agents.iter().map(|agent| name(agent)));
+            super::agent_groups::gather_by_rank(&mut agents, ranks);
+        }
+        crate::config::AgentPanelSortConfig::Spaces => {}
     }
     agents
         .into_iter()
@@ -86,27 +116,37 @@ pub(super) fn render_agent_panel(
         return;
     }
 
+    // Resolved once per frame for the filter, the chips, the order, and the headers.
+    let spaces = if snapshot.agents.is_empty() && config.agent_panel_filter.is_none() {
+        Vec::new()
+    } else {
+        super::agent_filter::space_labels(snapshot)
+    };
     let filter = config
         .agent_panel_filter
         .as_ref()
-        .filter(|filter| filter.workspace_in(endpoint_id, snapshot).is_some());
+        .filter(|filter| filter.space_among(endpoint_id, &spaces).is_some());
     let list_offset = super::agent_filter::render_chips(
         buffer,
         area,
-        || super::agent_filter::snapshot_chips(endpoint_id, snapshot, filter),
+        || super::agent_filter::snapshot_chips(endpoint_id, snapshot, &spaces, filter),
         filter,
         config,
         hits,
     );
-    let mut rows = agent_rows(
+    let mut rows = ordered_agent_pane_ids_among(
         snapshot,
-        config,
-        filter.map(|filter| filter.workspace_id.as_str()),
-    );
+        config.agent_panel_sort,
+        &spaces,
+        filter.map(|filter| filter.space.as_str()),
+    )
+    .into_iter()
+    .filter_map(|pane_id| agent_row(snapshot, &pane_id, config, None))
+    .collect::<Vec<_>>();
     let headers = if filter.is_none()
         && super::agent_groups::grouped_order(config, snapshot.agent_view_label.as_deref())
     {
-        space_headers(endpoint_id, snapshot, &rows)
+        space_headers(endpoint_id, &spaces, &rows)
     } else {
         Vec::new()
     };
@@ -282,43 +322,26 @@ pub(super) fn render_agent_list<T>(
     }
 }
 
-/// Headers for the spaces a single machine's rows run through, named as the Spaces panel does.
+/// Headers for the space names a single machine's rows run through.
 fn space_headers(
     endpoint_id: &ClientEndpointId,
-    snapshot: &ClientShellSnapshot,
+    spaces: &[(&ClientShellWorkspace, &str)],
     rows: &[AgentRow],
 ) -> Vec<Option<super::agent_groups::AgentGroupHeader>> {
-    let starts = super::agent_groups::group_starts(rows.iter().map(|row| &row.workspace_id));
-    if starts.is_empty() {
-        return Vec::new();
-    }
-    let labels = super::agent_filter::space_labels(snapshot);
+    let name =
+        |row: &AgentRow| super::agent_filter::space_name(spaces, &row.workspace_id).to_owned();
+    let starts = super::agent_groups::group_starts(rows.iter().map(name));
     rows.iter()
         .zip(starts)
         .map(|(row, start)| {
             start.then(|| super::agent_groups::AgentGroupHeader {
-                label: labels
-                    .iter()
-                    .find(|(workspace, _)| workspace.workspace_id == row.workspace_id)
-                    .map_or(row.workspace_id.as_str(), |(_, label)| label)
-                    .to_owned(),
+                label: name(row),
                 target: super::agent_filter::AgentPanelFilter {
                     endpoint_id: endpoint_id.clone(),
-                    workspace_id: row.workspace_id.clone(),
+                    space: name(row),
                 },
             })
         })
-        .collect()
-}
-
-fn agent_rows(
-    snapshot: &ClientShellSnapshot,
-    config: &ClientShellConfig,
-    workspace_id: Option<&str>,
-) -> Vec<AgentRow> {
-    ordered_agent_pane_ids(snapshot, config.agent_panel_sort, workspace_id)
-        .into_iter()
-        .filter_map(|pane_id| agent_row(snapshot, &pane_id, config, None))
         .collect()
 }
 

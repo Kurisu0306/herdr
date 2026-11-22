@@ -870,7 +870,7 @@ impl ClientShellState {
             KeybindAction::FocusAgent(_) | KeybindAction::PreviousAgent | KeybindAction::NextAgent
         ) && self.snapshot.as_deref().is_some_and(|snapshot| {
             self.config
-                .agent_filter_workspace(&self.active_endpoint_id, snapshot)
+                .agent_filter_space(&self.active_endpoint_id, snapshot)
                 .is_some()
         })
     }
@@ -912,7 +912,7 @@ impl ClientShellState {
                     snapshot,
                     self.config.agent_panel_sort,
                     self.config
-                        .agent_filter_workspace(&self.active_endpoint_id, snapshot),
+                        .agent_filter_space(&self.active_endpoint_id, snapshot),
                 );
                 Some(Method::PaneFocus(PaneTarget {
                     pane_id: agents.get(index)?.clone(),
@@ -923,7 +923,7 @@ impl ClientShellState {
                     snapshot,
                     self.config.agent_panel_sort,
                     self.config
-                        .agent_filter_workspace(&self.active_endpoint_id, snapshot),
+                        .agent_filter_space(&self.active_endpoint_id, snapshot),
                 );
                 if agents.is_empty() {
                     return None;

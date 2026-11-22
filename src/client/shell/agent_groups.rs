@@ -33,6 +33,34 @@ pub(super) fn group_starts<K: PartialEq>(keys: impl Iterator<Item = K>) -> Vec<b
     starts
 }
 
+/// For each key, the position at which that key first appeared.
+pub(super) fn first_appearance_ranks<K: PartialEq>(keys: impl Iterator<Item = K>) -> Vec<usize> {
+    let mut seen = Vec::new();
+    keys.map(|key| {
+        seen.iter()
+            .position(|known| *known == key)
+            .unwrap_or_else(|| {
+                seen.push(key);
+                seen.len() - 1
+            })
+    })
+    .collect()
+}
+
+/// Moves each item next to the first item of its rank, keeping every other relative order.
+/// Same-named spaces need not be neighbours in the Spaces panel, but they are one group here.
+pub(super) fn gather_by_rank<T>(items: &mut Vec<T>, ranks: Vec<usize>) {
+    if ranks.is_sorted() {
+        return;
+    }
+    let mut ranked = std::mem::take(items)
+        .into_iter()
+        .zip(ranks)
+        .collect::<Vec<_>>();
+    ranked.sort_by_key(|(_, rank)| *rank);
+    *items = ranked.into_iter().map(|(item, _)| item).collect();
+}
+
 /// Heights and trailing gaps of the list items. A header adds one row to the item it starts and
 /// keeps at least one blank row between it and the previous space.
 pub(super) fn list_layout(
@@ -71,7 +99,7 @@ mod tests {
             label: "space".into(),
             target: AgentPanelFilter {
                 endpoint_id: ClientEndpointId::Local,
-                workspace_id: "ws".into(),
+                space: "space".into(),
             },
         })
     }
@@ -88,6 +116,17 @@ mod tests {
     fn one_space_gets_no_header() {
         assert!(group_starts(["a", "a"].into_iter()).is_empty());
         assert!(group_starts(std::iter::empty::<&str>()).is_empty());
+    }
+
+    #[test]
+    fn gathering_joins_separated_runs_without_reordering_the_rest() {
+        let mut items = vec!["home-1", "work-1", "home-2", "play-1", "work-2"];
+        let ranks = first_appearance_ranks(items.iter().map(|item| &item[..4]));
+        assert_eq!(ranks, [0, 1, 0, 2, 1]);
+
+        gather_by_rank(&mut items, ranks);
+
+        assert_eq!(items, ["home-1", "home-2", "work-1", "work-2", "play-1"]);
     }
 
     #[test]

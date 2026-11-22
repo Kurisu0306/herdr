@@ -618,7 +618,8 @@ fn mobile_items(
     );
     // The switcher has no chip strip, so name the space a filter chosen in the sidebar keeps.
     let agent_view_label = snapshot.agent_view_label.as_deref().or_else(|| {
-        super::agent_filter::live_filter_label(config.agent_panel_filter.as_ref(), endpoints)
+        super::agent_filter::live_filter(config.agent_panel_filter.as_ref(), endpoints)
+            .map(|filter| filter.space.as_str())
     });
     if !agents.is_empty() || agent_view_label.is_some() {
         let title = agent_view_label
