@@ -187,7 +187,7 @@ fn agent_icon(agent: Option<crate::detect::Agent>) -> &'static str {
     use crate::detect::Agent;
     match agent {
         Some(Agent::Claude) => "✳",
-        Some(Agent::Codex) => "⬡",
+        Some(Agent::Codex) => "❂",
         Some(Agent::Gemini) => "✦",
         Some(Agent::Pi) => "π",
         _ => "◆",
