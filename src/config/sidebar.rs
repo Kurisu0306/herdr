@@ -475,9 +475,21 @@ impl Default for SpacesSidebarConfig {
     }
 }
 
+/// How the expanded sidebar arranges spaces and their agents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SidebarLayoutConfig {
+    /// A Spaces panel above a separate Agents panel.
+    #[default]
+    Split,
+    /// One list in which every space is followed by its agents.
+    Tree,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct SidebarConfig {
+    pub layout: SidebarLayoutConfig,
     pub agents: AgentsSidebarConfig,
     pub spaces: SpacesSidebarConfig,
 }

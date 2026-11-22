@@ -1,6 +1,6 @@
 use super::*;
 
-fn two_space_snapshot() -> ClientShellSnapshot {
+pub(super) fn two_space_snapshot() -> ClientShellSnapshot {
     let mut projected = snapshot();
     let mut second = projected.workspaces[0].clone();
     second.workspace_id = "ws_2".into();
@@ -27,7 +27,12 @@ fn two_space_snapshot() -> ClientShellSnapshot {
     projected
 }
 
-fn space_agent(pane_id: &str, workspace_id: &str, tab_id: &str, focused: bool) -> ClientShellAgent {
+pub(super) fn space_agent(
+    pane_id: &str,
+    workspace_id: &str,
+    tab_id: &str,
+    focused: bool,
+) -> ClientShellAgent {
     ClientShellAgent {
         pane_id: pane_id.into(),
         workspace_id: workspace_id.into(),
@@ -54,7 +59,7 @@ fn two_space_state() -> ClientShellState {
     state
 }
 
-fn listed_agents(state: &ClientShellState) -> Vec<&str> {
+pub(super) fn listed_agents(state: &ClientShellState) -> Vec<&str> {
     state
         .hits
         .agents
@@ -63,7 +68,7 @@ fn listed_agents(state: &ClientShellState) -> Vec<&str> {
         .collect()
 }
 
-fn chip_rect(state: &ClientShellState, space: Option<&str>) -> Rect {
+pub(super) fn chip_rect(state: &ClientShellState, space: Option<&str>) -> Rect {
     state
         .hits
         .agent_filter_chips
@@ -73,7 +78,7 @@ fn chip_rect(state: &ClientShellState, space: Option<&str>) -> Rect {
         .expect("space chip")
 }
 
-fn click(state: &mut ClientShellState, rect: Rect) -> ClientShellInput {
+pub(super) fn click(state: &mut ClientShellState, rect: Rect) -> ClientShellInput {
     let outcome = state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
         column: rect.x,
@@ -253,7 +258,7 @@ fn header_rect(state: &ClientShellState, space: &str) -> Rect {
         .expect("space header")
 }
 
-fn agent_rect(state: &ClientShellState, pane_id: &str) -> Rect {
+pub(super) fn agent_rect(state: &ClientShellState, pane_id: &str) -> Rect {
     state
         .hits
         .agents
@@ -376,7 +381,7 @@ fn chip_of_a_space_needing_attention_uses_its_status_color() {
 }
 
 /// `client-shell`, `second`, and another `client-shell` opened on the same directory.
-fn split_project_snapshot() -> ClientShellSnapshot {
+pub(super) fn split_project_snapshot() -> ClientShellSnapshot {
     let mut projected = two_space_snapshot();
     let mut third = projected.workspaces[0].clone();
     third.workspace_id = "ws_3".into();
@@ -467,7 +472,7 @@ fn priority_order_does_not_gather_same_named_spaces() {
     assert_eq!(listed_agents(&state), ["pane_2", "pane_3", "pane_1"]);
 }
 
-fn aged_agent(mut agent: ClientShellAgent, minutes_ago: u64) -> ClientShellAgent {
+pub(super) fn aged_agent(mut agent: ClientShellAgent, minutes_ago: u64) -> ClientShellAgent {
     // Half a minute into the bucket, so the label is the same wherever the clock ticks.
     let changed_at = crate::agent_state_time::unix_ms_now() - minutes_ago * 60_000 - 30_000;
     agent.tokens.push((

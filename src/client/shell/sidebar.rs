@@ -128,14 +128,11 @@ pub(crate) fn render_collapsed_sidebar(
         detail_area.width,
         detail_area.height.saturating_sub(1),
     );
-    for (index, pane_id) in super::ordered_agent_pane_ids(
-        snapshot,
-        config.agent_panel_sort,
-        config.agent_filter_space(endpoint_id, snapshot),
-    )
-    .into_iter()
-    .take(detail_content.height as usize)
-    .enumerate()
+    for (index, pane_id) in
+        super::ordered_agent_pane_ids(snapshot, config.agent_list_order(endpoint_id, snapshot))
+            .into_iter()
+            .take(detail_content.height as usize)
+            .enumerate()
     {
         let Some(agent) = snapshot
             .agents
@@ -209,6 +206,9 @@ pub(crate) fn render_sidebar(
     state: &mut ShellRenderState<'_>,
     hits: &mut ShellHitMap,
 ) {
+    if config.sidebar_tree {
+        return super::super::sidebar_tree::render(buffer, area, snapshot, config, state, hits);
+    }
     let palette = &config.palette;
     render_sidebar_background(buffer, area, palette);
     hits.sidebar_divider = if area.is_empty() {
@@ -380,6 +380,43 @@ pub(crate) fn render_sidebar(
         );
     }
 
+    render_sidebar_footer(buffer, workspace_area, snapshot, config, hits);
+
+    super::render_agent_panel(
+        buffer,
+        detail_area,
+        state.active_endpoint_id,
+        snapshot,
+        config,
+        state.agent_scroll,
+        hits,
+    );
+
+    hits.sidebar_toggle = Rect::new(
+        area.right().saturating_sub(2),
+        area.bottom().saturating_sub(1),
+        u16::from(area.width > 1),
+        u16::from(area.height > 0),
+    );
+    put_text(
+        buffer,
+        hits.sidebar_toggle.x,
+        hits.sidebar_toggle.y,
+        hits.sidebar_toggle.width,
+        "«",
+        Style::default().fg(palette.overlay0),
+    );
+}
+
+/// The `new` and `menu` controls on the last row of `workspace_area`.
+pub(in crate::client::shell) fn render_sidebar_footer(
+    buffer: &mut Buffer,
+    workspace_area: Rect,
+    snapshot: &ClientShellSnapshot,
+    config: &ClientShellConfig,
+    hits: &mut ShellHitMap,
+) {
+    let palette = &config.palette;
     let footer_y = workspace_area.bottom().saturating_sub(1);
     if config.mouse_capture {
         hits.new_workspace = Rect::new(
@@ -434,31 +471,6 @@ pub(crate) fn render_sidebar(
             );
         }
     }
-
-    super::render_agent_panel(
-        buffer,
-        detail_area,
-        state.active_endpoint_id,
-        snapshot,
-        config,
-        state.agent_scroll,
-        hits,
-    );
-
-    hits.sidebar_toggle = Rect::new(
-        area.right().saturating_sub(2),
-        area.bottom().saturating_sub(1),
-        u16::from(area.width > 1),
-        u16::from(area.height > 0),
-    );
-    put_text(
-        buffer,
-        hits.sidebar_toggle.x,
-        hits.sidebar_toggle.y,
-        hits.sidebar_toggle.width,
-        "«",
-        Style::default().fg(palette.overlay0),
-    );
 }
 
 pub(crate) fn workspace_entries(
@@ -688,7 +700,24 @@ pub(in crate::client::shell) fn workspace_rows(
     indented: bool,
     config: &SpacesSidebarConfig,
 ) -> Vec<Vec<crate::ui::ResolvedToken>> {
-    let label = workspace_display_label(workspace, indented);
+    workspace_rows_named(
+        workspace,
+        workspace_display_label(workspace, indented),
+        status,
+        indented,
+        config,
+    )
+}
+
+/// Space rows for `workspace` listed under `label`, which the tree sidebar shares between
+/// same-named workspaces.
+pub(in crate::client::shell) fn workspace_rows_named(
+    workspace: &ClientShellWorkspace,
+    label: &str,
+    status: crate::api::schema::AgentStatus,
+    suppress_git_details: bool,
+    config: &SpacesSidebarConfig,
+) -> Vec<Vec<crate::ui::ResolvedToken>> {
     let token_values = workspace.tokens.iter().cloned().collect::<HashMap<_, _>>();
     crate::ui::sidebar_space_rows(
         config,
@@ -698,7 +727,7 @@ pub(in crate::client::shell) fn workspace_rows(
             state_text: status_text(status),
             ahead_behind: workspace.git_ahead_behind,
             tokens: &token_values,
-            suppress_git_details: indented,
+            suppress_git_details,
         },
     )
 }

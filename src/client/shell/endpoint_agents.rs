@@ -65,6 +65,7 @@ pub(super) fn render_expanded(
     let list_offset = super::agent_filter::render_chips(
         buffer,
         area,
+        super::agent_filter::AGENT_PANEL_TITLE_ROWS,
         || super::agent_filter::endpoint_chips(endpoints, filter),
         filter,
         config,
@@ -238,6 +239,7 @@ fn agent_rows(
         active_endpoint_id,
         config.agent_panel_sort,
         config.agent_panel_filter.as_ref(),
+        config.tree_collapsed_spaces(),
     )
     .into_iter()
     .filter_map(|row| {

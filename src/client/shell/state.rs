@@ -26,6 +26,10 @@ pub(crate) struct ClientShellConfig {
     pub(super) spaces: SpacesSidebarConfig,
     pub(super) agents: crate::config::AgentsSidebarConfig,
     pub(super) agent_panel_sort: crate::config::AgentPanelSortConfig,
+    /// Whether the expanded sidebar lists each space once with its agents beneath it.
+    pub(super) sidebar_tree: bool,
+    /// Space names whose agents the tree sidebar hides. Toggled by clicking, kept per endpoint.
+    pub(super) collapsed_spaces: HashSet<String>,
     /// Space the Agents panel is narrowed to. Chosen by clicking a chip, never loaded from config.
     pub(super) agent_panel_filter: Option<super::agent_filter::AgentPanelFilter>,
     pub(super) status_indicators: crate::config::StatusIndicatorStyle,
@@ -110,6 +114,8 @@ pub(super) struct ShellHitMap {
     pub(super) agent_filter_chips: Vec<(Rect, Option<super::agent_filter::AgentPanelFilter>)>,
     /// Whether any drawn agent row shows how long ago its state changed.
     pub(super) agent_ages_shown: bool,
+    /// Collapse toggles on the tree sidebar's space rows, with the space name each one folds.
+    pub(super) space_collapse_toggles: Vec<(Rect, String)>,
     /// Space headers inside the grouped Agents list; clicking one selects its space.
     pub(super) agent_group_headers: Vec<(Rect, super::agent_filter::AgentPanelFilter)>,
     pub(super) sidebar_divider: Rect,
@@ -898,6 +904,8 @@ pub(crate) struct ClientShellState {
     pub(super) workspace_scroll: usize,
     pub(super) agent_scroll: usize,
     pub(super) pending_agent_reveal: Option<(ClientEndpointId, String)>,
+    /// Agent pane the tree sidebar scrolls into view on its next frame.
+    pub(super) reveal_tree_agent: Option<String>,
     pub(super) tab_scroll: usize,
     pub(super) mobile_switcher_scroll: usize,
     pub(super) reveal_focused_workspace: bool,
@@ -1034,6 +1042,7 @@ impl ClientShellState {
         if let Some(sort) = preferences.agent_panel_sort {
             config.agent_panel_sort = sort;
         }
+        config.collapsed_spaces = preferences.collapsed_spaces.iter().cloned().collect();
         let mut remote_collapsed_groups = HashMap::<ClientEndpointId, HashSet<String>>::new();
         for saved in preferences.remote_collapsed_groups {
             let Ok(profile_id) = crate::client::endpoint::ProfileId::parse(saved.profile_id) else {
@@ -1074,6 +1083,7 @@ impl ClientShellState {
             workspace_scroll: 0,
             agent_scroll: 0,
             pending_agent_reveal: None,
+            reveal_tree_agent: None,
             tab_scroll: 0,
             mobile_switcher_scroll: 0,
             reveal_focused_workspace: true,

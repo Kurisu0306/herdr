@@ -26,6 +26,9 @@ pub(super) struct ClientChromePreferences {
     pub(super) agent_panel_sort: Option<crate::config::AgentPanelSortConfig>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) collapsed_groups: Vec<String>,
+    /// Space names folded in the tree sidebar.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) collapsed_spaces: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) remote_collapsed_groups: Vec<ClientRemoteCollapsedGroups>,
 }

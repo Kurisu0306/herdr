@@ -1061,6 +1061,16 @@
           ]
         },
         {
+          "key": "ui.sidebar.layout",
+          "type": "enum",
+          "default": "split",
+          "description": "Expanded sidebar arrangement. split keeps the Spaces panel above the Agents panel. tree lists every space once, followed by its agents, with collapsible groups.",
+          "values": [
+            "split",
+            "tree"
+          ]
+        },
+        {
           "key": "ui.sidebar.agents.row_gap",
           "type": "integer",
           "default": "0",

@@ -8,10 +8,8 @@ use super::*;
 
 const ALL_LABEL: &str = "all";
 const CHIP_LABEL_MAX_WIDTH: usize = 16;
-/// Divider and title rows above the chip strip.
-const PANEL_TITLE_ROWS: u16 = 2;
-/// Rows the Agents list starts below the panel top when no chips are drawn.
-pub(super) const AGENT_LIST_OFFSET: u16 = 3;
+/// Divider and title rows above the chip strip of the Agents panel.
+pub(super) const AGENT_PANEL_TITLE_ROWS: u16 = 2;
 
 /// Spaces in Spaces-panel order, each with the name that panel lists it under.
 pub(super) type SpaceLabels<'a> = Vec<(&'a ClientShellWorkspace, &'a str)>;
@@ -256,35 +254,37 @@ fn layout_chips(widths: &[u16], row_width: u16, max_rows: u16, active: usize) ->
     place_chips(&promoted, widths, row_width, max_rows, active)
 }
 
-/// Draws the space chips under the Agents title and returns the row where the list starts,
-/// relative to the top of `area`.
+/// Draws the space chips below a panel's `title_rows` and returns the row where the list
+/// starts, relative to the top of `area`. Without chips the list starts after one spacer row.
 ///
 /// `chips` is only called once the strip can be drawn, so a frame without it pays nothing.
 pub(super) fn render_chips<'a>(
     buffer: &mut Buffer,
     area: Rect,
+    title_rows: u16,
     chips: impl FnOnce() -> Vec<AgentFilterChip<'a>>,
     active: Option<&AgentPanelFilter>,
     config: &ClientShellConfig,
     hits: &mut ShellHitMap,
 ) -> u16 {
+    let plain_offset = title_rows + 1;
     // An active filter always shows its chip so it can be seen and clicked off. Otherwise the
     // strip is no use without a mouse.
     if active.is_none() && !config.mouse_capture {
-        return AGENT_LIST_OFFSET;
+        return plain_offset;
     }
     // The list keeps at least one row below the title rows, one chip row, and the spacer.
     let Some(list_rows) = area
         .height
-        .checked_sub(AGENT_LIST_OFFSET)
+        .checked_sub(plain_offset)
         .filter(|rows| *rows >= 2)
     else {
-        return AGENT_LIST_OFFSET;
+        return plain_offset;
     };
     let chips = chips();
     // One populated space leaves nothing to choose between.
     if active.is_none() && chips.len() < 2 {
-        return AGENT_LIST_OFFSET;
+        return plain_offset;
     }
     let row_width = area.width.saturating_sub(1);
     let labels = std::iter::once(ALL_LABEL)
@@ -306,12 +306,12 @@ pub(super) fn render_chips<'a>(
     let max_rows = (list_rows / 3).max(1);
     let layout = layout_chips(&widths, row_width, max_rows, active_index);
     let Some(last) = layout.slots.last().copied() else {
-        return AGENT_LIST_OFFSET;
+        return plain_offset;
     };
 
     let palette = &config.palette;
     let origin_x = area.x.saturating_add(1);
-    let origin_y = area.y.saturating_add(PANEL_TITLE_ROWS);
+    let origin_y = area.y.saturating_add(title_rows);
     for slot in &layout.slots {
         let rect = Rect::new(origin_x + slot.x, origin_y + slot.row, slot.width, 1);
         let chip = slot.index.checked_sub(1).and_then(|index| chips.get(index));
@@ -361,7 +361,7 @@ pub(super) fn render_chips<'a>(
                 .add_modifier(Modifier::DIM),
         );
     }
-    PANEL_TITLE_ROWS + last.row + 2
+    title_rows + last.row + 2
 }
 
 #[cfg(test)]

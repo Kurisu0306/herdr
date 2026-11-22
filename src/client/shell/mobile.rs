@@ -615,6 +615,7 @@ fn mobile_items(
         active_endpoint_id,
         config.agent_panel_sort,
         config.agent_panel_filter.as_ref(),
+        config.tree_collapsed_spaces(),
     );
     // The switcher has no chip strip, so it names the space a filter chosen in the sidebar
     // keeps and offers the way back to every space.

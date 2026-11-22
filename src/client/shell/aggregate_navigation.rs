@@ -58,8 +58,40 @@ pub(super) fn aggregate_agent_rows<'a>(
     active_endpoint_id: &ClientEndpointId,
     sort: crate::config::AgentPanelSortConfig,
     filter: Option<&super::agent_filter::AgentPanelFilter>,
+    tree: Option<&HashSet<String>>,
 ) -> Vec<AggregateAgentRow<'a>> {
     let filter = super::agent_filter::live_filter(filter, endpoints);
+    // The tree sidebar only arranges a single machine; its order is that machine's own.
+    if let (Some(collapsed), Some(endpoint), 1) = (
+        tree,
+        cached_endpoint_snapshots(endpoints).next(),
+        endpoints.len(),
+    ) {
+        let order = super::agent_sidebar::AgentListOrder {
+            sort,
+            space: filter.map(|filter| filter.space.as_str()),
+            tree: Some(collapsed),
+        };
+        return super::agent_sidebar::ordered_agent_pane_ids(endpoint.snapshot, order)
+            .into_iter()
+            .filter_map(|pane_id| {
+                let agent = endpoint
+                    .snapshot
+                    .agents
+                    .iter()
+                    .find(|agent| agent.pane_id == pane_id)?;
+                Some(AggregateAgentRow {
+                    recency: endpoint
+                        .agent_recency
+                        .get(&pane_id)
+                        .copied()
+                        .unwrap_or_default(),
+                    endpoint,
+                    agent,
+                })
+            })
+            .collect();
+    }
     let filter_spaces = filter
         .and_then(|filter| {
             endpoints
@@ -156,24 +188,31 @@ pub(super) fn aggregate_agent_rows<'a>(
 
     let mut rows = cached_endpoint_snapshots(endpoints)
         .flat_map(|endpoint| {
-            super::agent_sidebar::ordered_agent_pane_ids(endpoint.snapshot, sort, None)
-                .into_iter()
-                .filter_map(move |pane_id| {
-                    let agent = endpoint
-                        .snapshot
-                        .agents
-                        .iter()
-                        .find(|agent| agent.pane_id == pane_id)?;
-                    Some(AggregateAgentRow {
-                        recency: endpoint
-                            .agent_recency
-                            .get(&pane_id)
-                            .copied()
-                            .unwrap_or_default(),
-                        endpoint,
-                        agent,
-                    })
+            super::agent_sidebar::ordered_agent_pane_ids(
+                endpoint.snapshot,
+                super::agent_sidebar::AgentListOrder {
+                    sort,
+                    space: None,
+                    tree: None,
+                },
+            )
+            .into_iter()
+            .filter_map(move |pane_id| {
+                let agent = endpoint
+                    .snapshot
+                    .agents
+                    .iter()
+                    .find(|agent| agent.pane_id == pane_id)?;
+                Some(AggregateAgentRow {
+                    recency: endpoint
+                        .agent_recency
+                        .get(&pane_id)
+                        .copied()
+                        .unwrap_or_default(),
+                    endpoint,
+                    agent,
                 })
+            })
         })
         .collect::<Vec<_>>();
     keep_filtered(&mut rows);
@@ -312,8 +351,9 @@ pub(super) fn online_agent_targets(
     active_endpoint_id: &ClientEndpointId,
     sort: crate::config::AgentPanelSortConfig,
     filter: Option<&super::agent_filter::AgentPanelFilter>,
+    tree: Option<&HashSet<String>>,
 ) -> Vec<AggregateAgentTarget> {
-    aggregate_agent_rows(endpoints, active_endpoint_id, sort, filter)
+    aggregate_agent_rows(endpoints, active_endpoint_id, sort, filter, tree)
         .into_iter()
         .filter(|row| !row.endpoint.stale())
         .map(|row| AggregateAgentTarget {

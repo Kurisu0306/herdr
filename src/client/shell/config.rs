@@ -88,6 +88,16 @@ impl ClientShellState {
                 .agent_panel_sort_manual
                 .then_some(self.config.agent_panel_sort),
             collapsed_groups,
+            collapsed_spaces: {
+                let mut spaces = self
+                    .config
+                    .collapsed_spaces
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                spaces.sort();
+                spaces
+            },
             remote_collapsed_groups,
         };
         if let Err(error) = preferences::store(path, preferences) {
@@ -147,6 +157,8 @@ impl ClientShellConfig {
             spaces: config.ui.sidebar.spaces.clone(),
             agents: config.ui.sidebar.agents.clone(),
             agent_panel_sort: config.ui.agent_panel_sort,
+            sidebar_tree: config.ui.sidebar.layout == crate::config::SidebarLayoutConfig::Tree,
+            collapsed_spaces: HashSet::new(),
             agent_panel_filter: None,
             status_indicators: config.ui.status_indicators,
             sound_enabled: config.ui.sound.enabled,
@@ -374,6 +386,7 @@ impl ClientShellConfig {
                 self.hide_tab_bar_when_single_tab = ui.hide_tab_bar_when_single_tab;
                 self.spaces = ui.sidebar.spaces.clone();
                 self.agents = ui.sidebar.agents.clone();
+                self.sidebar_tree = ui.sidebar.layout == crate::config::SidebarLayoutConfig::Tree;
                 self.agent_panel_sort = ui.agent_panel_sort;
                 self.status_indicators = ui.status_indicators;
                 self.sound_enabled = ui.sound.enabled;

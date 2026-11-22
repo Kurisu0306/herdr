@@ -317,6 +317,15 @@ With the `grouped` order, the expanded list also names each space in a header ab
 
 Each agent's first row in the expanded list ends with how long ago the agent entered its current state, such as `now`, `5m`, `3h`, or `2d`. The age needs a server that records state-change times; rows from an older server show none. It is dropped when the sidebar is too narrow to keep the row text readable. Servers publish the time as the reserved pane token `herdr.state_changed_at`, a Unix time in milliseconds, which also appears in `agent list`.
 
+To replace the two panels with one list, set the tree layout:
+
+```toml
+[ui.sidebar]
+layout = "tree"
+```
+
+The tree shows every space once, followed by its agents. Same-named spaces on one machine share a row, which acts on the focused workspace among them, or the first. Inside a space, agents that need you come first. Click the control at the right of a space row to fold its agents: a folded space shows how many it hides and leaves them out of agent navigation, and the choice is remembered per endpoint. Chips, ages, and the row layouts below apply to the tree as well; the `grouped` and `priority` toggle does not. The tree arranges a single machine, so Herdr keeps the split layout while saved machines are connected, and workspaces can only be dragged into a new order in the split layout.
+
 `ui.pane_borders` accepts `"auto"` (the default, borders only for split panes), `"always"` (also frame a single pane), or `"off"`. A single-pane frame requires `ui.pane_outer_borders = true`, because all its edges are outer edges. Existing boolean values remain valid: `true` means `"auto"` and `false` means `"off"`.
 
 Set `tab_bar_position = "bottom"` under `[ui]` to place the desktop tab row below the terminal panes. Prefix, Navigate, Copy, and Resize mode bars temporarily replace the bottom tab row while active. The default is `"top"`.

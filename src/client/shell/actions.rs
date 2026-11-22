@@ -860,8 +860,8 @@ impl ClientShellState {
         (repaint, Vec::new())
     }
 
-    /// The server orders agents without the client-local space filter, so an agent action the
-    /// filtered list cannot resolve must not fall through to the server's unfiltered list.
+    /// The server orders agents without the client-local space filter or tree arrangement, so an
+    /// agent action this client's list cannot resolve must not fall through to the server's list.
     fn agent_action_stays_in_filtered_list(&self, action: crate::input::KeybindAction) -> bool {
         use crate::input::KeybindAction;
 
@@ -869,9 +869,11 @@ impl ClientShellState {
             action,
             KeybindAction::FocusAgent(_) | KeybindAction::PreviousAgent | KeybindAction::NextAgent
         ) && self.snapshot.as_deref().is_some_and(|snapshot| {
-            self.config
-                .agent_filter_space(&self.active_endpoint_id, snapshot)
-                .is_some()
+            self.config.sidebar_tree
+                || self
+                    .config
+                    .agent_filter_space(&self.active_endpoint_id, snapshot)
+                    .is_some()
         })
     }
 
@@ -910,9 +912,8 @@ impl ClientShellState {
             KeybindAction::FocusAgent(index) => {
                 let agents = super::agent_sidebar::ordered_agent_pane_ids(
                     snapshot,
-                    self.config.agent_panel_sort,
                     self.config
-                        .agent_filter_space(&self.active_endpoint_id, snapshot),
+                        .agent_list_order(&self.active_endpoint_id, snapshot),
                 );
                 Some(Method::PaneFocus(PaneTarget {
                     pane_id: agents.get(index)?.clone(),
@@ -921,9 +922,8 @@ impl ClientShellState {
             KeybindAction::PreviousAgent | KeybindAction::NextAgent => {
                 let agents = super::agent_sidebar::ordered_agent_pane_ids(
                     snapshot,
-                    self.config.agent_panel_sort,
                     self.config
-                        .agent_filter_space(&self.active_endpoint_id, snapshot),
+                        .agent_list_order(&self.active_endpoint_id, snapshot),
                 );
                 if agents.is_empty() {
                     return None;
@@ -947,7 +947,12 @@ impl ClientShellState {
                     .iter()
                     .any(|(_, visible_pane_id)| visible_pane_id == &pane_id)
                 {
-                    self.agent_scroll = next.min(self.hits.agent_max_scroll);
+                    if self.config.sidebar_tree {
+                        // Tree entries include space rows, so the list finds the agent itself.
+                        self.reveal_tree_agent = Some(pane_id.clone());
+                    } else {
+                        self.agent_scroll = next.min(self.hits.agent_max_scroll);
+                    }
                 }
                 Some(Method::PaneFocus(PaneTarget { pane_id }))
             }

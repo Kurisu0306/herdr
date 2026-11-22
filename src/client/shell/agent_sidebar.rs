@@ -31,67 +31,115 @@ impl AgentRow {
     }
 }
 
-/// Agent panes in panel order, optionally narrowed to the spaces named `space`.
+/// What decides the Agents list order for one machine's snapshot.
+#[derive(Clone, Copy)]
+pub(super) struct AgentListOrder<'a> {
+    pub(super) sort: crate::config::AgentPanelSortConfig,
+    /// Space name a live filter keeps.
+    pub(super) space: Option<&'a str>,
+    /// Collapsed space names, when the tree sidebar arranges the list.
+    pub(super) tree: Option<&'a HashSet<String>>,
+}
+
+impl ClientShellConfig {
+    /// Collapsed space names when the tree sidebar arranges the Agents list.
+    pub(super) fn tree_collapsed_spaces(&self) -> Option<&HashSet<String>> {
+        self.sidebar_tree.then_some(&self.collapsed_spaces)
+    }
+
+    pub(super) fn agent_list_order<'a>(
+        &'a self,
+        endpoint_id: &ClientEndpointId,
+        snapshot: &ClientShellSnapshot,
+    ) -> AgentListOrder<'a> {
+        AgentListOrder {
+            sort: self.agent_panel_sort,
+            space: self.agent_filter_space(endpoint_id, snapshot),
+            tree: self.tree_collapsed_spaces(),
+        }
+    }
+}
+
+/// Agent panes in the order the Agents list shows them.
 pub(super) fn ordered_agent_pane_ids(
     snapshot: &ClientShellSnapshot,
-    sort: crate::config::AgentPanelSortConfig,
-    space: Option<&str>,
+    order: AgentListOrder<'_>,
 ) -> Vec<String> {
-    // Space names are only needed to match a filter or to gather same-named spaces.
-    let gathers = sort == crate::config::AgentPanelSortConfig::Spaces
+    // Space names are only needed to match a filter or to keep same-named spaces together.
+    let gathers = order.sort == crate::config::AgentPanelSortConfig::Spaces
         && snapshot.agent_view_label.is_none()
         && snapshot.agents.len() > 1;
-    let spaces = if space.is_some() || gathers {
+    let spaces = if order.space.is_some() || order.tree.is_some() || gathers {
         super::agent_filter::space_labels(snapshot)
     } else {
         Vec::new()
     };
-    ordered_agent_pane_ids_among(snapshot, sort, &spaces, space)
+    ordered_agent_pane_ids_among(snapshot, &spaces, order)
 }
 
 /// [`ordered_agent_pane_ids`] for a caller that already resolved the snapshot's space names.
 pub(super) fn ordered_agent_pane_ids_among(
     snapshot: &ClientShellSnapshot,
-    sort: crate::config::AgentPanelSortConfig,
     spaces: &[(&ClientShellWorkspace, &str)],
-    space: Option<&str>,
+    order: AgentListOrder<'_>,
 ) -> Vec<String> {
     let name = |agent: &crate::protocol::ClientShellAgent| {
         super::agent_filter::space_name(spaces, &agent.workspace_id).to_owned()
     };
     let kept = |agent: &&crate::protocol::ClientShellAgent| {
-        space.is_none_or(|space| {
+        order.space.is_none_or(|space| {
             super::agent_filter::space_name(spaces, &agent.workspace_id) == space
         })
     };
-    if snapshot.agent_view_label.is_some() {
-        return snapshot
+    let viewed = snapshot.agent_view_label.is_some();
+    let mut agents = if viewed {
+        snapshot
             .agent_order
             .iter()
-            .filter(|pane_id| {
+            .filter_map(|pane_id| {
                 snapshot
                     .agents
                     .iter()
-                    .filter(kept)
-                    .any(|agent| agent.pane_id == pane_id.as_str())
+                    .find(|agent| agent.pane_id == pane_id.as_str())
             })
-            .cloned()
-            .collect();
-    }
-    let mut agents = snapshot.agents.iter().filter(kept).collect::<Vec<_>>();
-    match sort {
-        crate::config::AgentPanelSortConfig::Priority => agents.sort_by_key(|agent| {
+            .filter(kept)
+            .collect::<Vec<_>>()
+    } else {
+        snapshot.agents.iter().filter(kept).collect::<Vec<_>>()
+    };
+    if let Some(collapsed) = order.tree {
+        // The tree lists spaces in Spaces-panel order and, inside each, the agents that need
+        // the user first. A collapsed space hides its agents from the list and from navigation.
+        agents.retain(|agent| !collapsed.contains(&name(agent)));
+        let rank = |agent: &crate::protocol::ClientShellAgent| {
+            let space = super::agent_filter::space_name(spaces, &agent.workspace_id);
+            spaces
+                .iter()
+                .position(|(_, name)| *name == space)
+                .unwrap_or(usize::MAX)
+        };
+        agents.sort_by_key(|agent| {
             (
+                rank(agent),
                 std::cmp::Reverse(status_priority(agent.agent_status)),
-                std::cmp::Reverse(agent.state_change_seq),
             )
-        }),
-        crate::config::AgentPanelSortConfig::Spaces if space.is_none() => {
-            let ranks =
-                super::agent_groups::first_appearance_ranks(agents.iter().map(|agent| name(agent)));
-            super::agent_groups::gather_by_rank(&mut agents, ranks);
+        });
+    } else if !viewed {
+        match order.sort {
+            crate::config::AgentPanelSortConfig::Priority => agents.sort_by_key(|agent| {
+                (
+                    std::cmp::Reverse(status_priority(agent.agent_status)),
+                    std::cmp::Reverse(agent.state_change_seq),
+                )
+            }),
+            crate::config::AgentPanelSortConfig::Spaces if order.space.is_none() => {
+                let ranks = super::agent_groups::first_appearance_ranks(
+                    agents.iter().map(|agent| name(agent)),
+                );
+                super::agent_groups::gather_by_rank(&mut agents, ranks);
+            }
+            crate::config::AgentPanelSortConfig::Spaces => {}
         }
-        crate::config::AgentPanelSortConfig::Spaces => {}
     }
     agents
         .into_iter()
@@ -132,6 +180,7 @@ pub(super) fn render_agent_panel(
     let list_offset = super::agent_filter::render_chips(
         buffer,
         area,
+        super::agent_filter::AGENT_PANEL_TITLE_ROWS,
         || super::agent_filter::snapshot_chips(endpoint_id, snapshot, &spaces, filter),
         filter,
         config,
@@ -139,9 +188,12 @@ pub(super) fn render_agent_panel(
     );
     let mut rows = ordered_agent_pane_ids_among(
         snapshot,
-        config.agent_panel_sort,
         &spaces,
-        filter.map(|filter| filter.space.as_str()),
+        AgentListOrder {
+            sort: config.agent_panel_sort,
+            space: filter.map(|filter| filter.space.as_str()),
+            tree: None,
+        },
     )
     .into_iter()
     .filter_map(|pane_id| agent_row(snapshot, &pane_id, config, None, now_ms))

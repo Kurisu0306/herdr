@@ -712,6 +712,7 @@ fn agent_navigation_keeps_scroll_when_target_is_visible() {
         &state.active_endpoint_id,
         state.config.agent_panel_sort,
         None,
+        None,
     );
     let index = targets
         .iter()
@@ -1906,6 +1907,7 @@ fn selected_position_sort_uses_public_tab_and_pane_numbers() {
         &state.active_endpoint_id,
         crate::config::AgentPanelSortConfig::Priority,
         None,
+        None,
     )
     .into_iter()
     .map(|row| row.agent.name.as_deref().expect("agent name"))
@@ -2951,6 +2953,7 @@ fn space_chip_filters_agents_to_one_machine_space() {
         &state.active_endpoint_id,
         state.config.agent_panel_sort,
         state.config.agent_panel_filter.as_ref(),
+        None,
     );
     assert_eq!(targets.len(), 1);
     assert_eq!(targets[0].endpoint_id, remote);
