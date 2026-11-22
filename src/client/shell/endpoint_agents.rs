@@ -83,7 +83,8 @@ pub(super) fn render_expanded(
         hits,
         |row| row.agent.rows.len(),
         |buffer, rect, row, hits| {
-            super::agent_sidebar::render_agent_row(buffer, rect, &row.agent, config);
+            hits.agent_ages_shown |=
+                super::agent_sidebar::render_agent_row(buffer, rect, &row.agent, config);
             if row.stale {
                 buffer.set_style(
                     rect,
@@ -208,6 +209,7 @@ fn agent_rows(
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
 ) -> Vec<EndpointAgentRow> {
+    let now_ms = crate::agent_state_time::unix_ms_now();
     let mut rendered_rows = endpoints
         .iter()
         .filter_map(|endpoint| {
@@ -221,6 +223,7 @@ fn agent_rows(
                             &agent.pane_id,
                             config,
                             Some(&endpoint.label),
+                            now_ms,
                         )
                     })
                     .map(|agent| ((endpoint.endpoint_id.clone(), agent.pane_id.clone()), agent))

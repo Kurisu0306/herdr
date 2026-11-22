@@ -315,6 +315,8 @@ When agents are running in more than one space, the Agents panel shows a row of 
 
 With the `grouped` order, the expanded list also names each space in a header above its agents; clicking a header selects that space like its chip. Under a header or a selected chip, a row made up only of the `workspace` token is omitted because the space is already named. Priority order and Agent views interleave spaces, so they keep the flat list and every configured row. Spaces that share a name on one machine, such as two spaces opened on the same directory, count as one: they share a chip and a header, and the grouped order lists their agents together.
 
+Each agent's first row in the expanded list ends with how long ago the agent entered its current state, such as `now`, `5m`, `3h`, or `2d`. The age needs a server that records state-change times; rows from an older server show none. It is dropped when the sidebar is too narrow to keep the row text readable. Servers publish the time as the reserved pane token `herdr.state_changed_at`, a Unix time in milliseconds, which also appears in `agent list`.
+
 `ui.pane_borders` accepts `"auto"` (the default, borders only for split panes), `"always"` (also frame a single pane), or `"off"`. A single-pane frame requires `ui.pane_outer_borders = true`, because all its edges are outer edges. Existing boolean values remain valid: `true` means `"auto"` and `false` means `"off"`.
 
 Set `tab_bar_position = "bottom"` under `[ui]` to place the desktop tab row below the terminal panes. Prefix, Navigate, Copy, and Resize mode bars temporarily replace the bottom tab row while active. The default is `"top"`.

@@ -235,6 +235,10 @@ impl ClientShellState {
                 workspace_drop_indicator_row,
             },
         );
+        self.agent_age_refresh_at = self
+            .hits
+            .agent_ages_shown
+            .then(|| std::time::Instant::now() + AGENT_AGE_REFRESH_INTERVAL);
         self.hits.panes = surface
             .panes
             .iter()

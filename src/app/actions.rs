@@ -1756,6 +1756,8 @@ impl AppState {
             self.next_agent_state_change_seq += 1;
             if let Some(terminal) = self.terminals.get_mut(&terminal_id) {
                 terminal.last_agent_state_change_seq = Some(self.next_agent_state_change_seq);
+                terminal.last_agent_state_change_at_ms =
+                    Some(crate::agent_state_time::unix_ms_now());
                 terminal.last_agent_completion_seq = (!suppress_completion
                     && is_completion_transition(&change))
                 .then_some(self.next_agent_state_change_seq);
@@ -3163,6 +3165,35 @@ mod tests {
             );
         }
         app.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn state_change_records_when_it_happened() {
+        let mut app = app_with_workspaces(&["active", "background"]);
+        let pane_id = app.workspaces[1].tabs[0].root_pane;
+        let terminal_id = app.workspaces[1].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        assert_eq!(
+            app.terminals[&terminal_id].last_agent_state_change_at_ms,
+            None
+        );
+
+        let before = crate::agent_state_time::unix_ms_now();
+        app.handle_app_event(AppEvent::StateChanged {
+            pane_id,
+            agent: Some(Agent::Pi),
+            state: AgentState::Working,
+            visible_blocker: false,
+            visible_working: true,
+            process_exited: false,
+            observed_at: Instant::now(),
+        });
+
+        let stamped = app.terminals[&terminal_id]
+            .last_agent_state_change_at_ms
+            .expect("state change is stamped");
+        assert!((before..=crate::agent_state_time::unix_ms_now()).contains(&stamped));
     }
 
     #[test]

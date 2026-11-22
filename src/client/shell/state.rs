@@ -4,6 +4,8 @@ pub(super) const MIN_TAB_WIDTH: u16 = 8;
 pub(super) const NEW_TAB_WIDTH: u16 = 3;
 pub(super) const WORKSPACE_HEADER_ROWS: u16 = 2;
 const ENDPOINT_ERROR_TIMEOUT_SECS: u64 = 5;
+pub(super) const AGENT_AGE_REFRESH_INTERVAL: std::time::Duration =
+    std::time::Duration::from_secs(30);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClientShellKeybindingSource {
@@ -104,6 +106,8 @@ pub(super) struct ShellHitMap {
     pub(super) agent_sort_toggle: Rect,
     /// Space chips under the Agents title; `None` is the leading `all` chip.
     pub(super) agent_filter_chips: Vec<(Rect, Option<super::agent_filter::AgentPanelFilter>)>,
+    /// Whether any drawn agent row shows how long ago its state changed.
+    pub(super) agent_ages_shown: bool,
     /// Space headers inside the grouped Agents list; clicking one selects its space.
     pub(super) agent_group_headers: Vec<(Rect, super::agent_filter::AgentPanelFilter)>,
     pub(super) sidebar_divider: Rect,
@@ -902,6 +906,8 @@ pub(crate) struct ClientShellState {
     pub(super) last_composed_size: Option<(u16, u16)>,
     pub(super) last_composed_at: Option<std::time::Instant>,
     pub(super) selection_repaint_deadline: Option<std::time::Instant>,
+    /// When drawn agent ages go stale and the sidebar needs another frame.
+    pub(super) agent_age_refresh_at: Option<std::time::Instant>,
     pub(super) hits: ShellHitMap,
     pub(super) endpoints: Vec<ClientShellEndpoint>,
     pub(super) active_endpoint_id: ClientEndpointId,
@@ -1076,6 +1082,7 @@ impl ClientShellState {
             last_composed_size: None,
             last_composed_at: None,
             selection_repaint_deadline: None,
+            agent_age_refresh_at: None,
             hits: ShellHitMap::default(),
             endpoints: vec![local_endpoint()],
             active_endpoint_id: ClientEndpointId::Local,
@@ -1880,6 +1887,19 @@ impl ClientShellState {
         {
             self.endpoint_error = None;
             self.endpoint_error_deadline = None;
+            return true;
+        }
+        false
+    }
+
+    /// Agent ages count whole minutes, so a quiet sidebar is redrawn twice a minute while it
+    /// shows any.
+    pub(crate) fn tick_agent_ages(&mut self, now: std::time::Instant) -> bool {
+        if self
+            .agent_age_refresh_at
+            .is_some_and(|deadline| now >= deadline)
+        {
+            self.agent_age_refresh_at = None;
             return true;
         }
         false

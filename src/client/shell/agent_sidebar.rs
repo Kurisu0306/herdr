@@ -13,6 +13,8 @@ use super::*;
 pub(super) struct AgentRow {
     pub(super) pane_id: String,
     pub(super) workspace_id: String,
+    /// How long ago the agent entered its current state, when its server reports that.
+    pub(super) age: Option<String>,
     pub(super) status: crate::api::schema::AgentStatus,
     pub(super) focused: bool,
     pub(super) rows: Vec<Vec<crate::ui::ResolvedToken>>,
@@ -116,6 +118,7 @@ pub(super) fn render_agent_panel(
         return;
     }
 
+    let now_ms = crate::agent_state_time::unix_ms_now();
     // Resolved once per frame for the filter, the chips, the order, and the headers.
     let spaces = if snapshot.agents.is_empty() && config.agent_panel_filter.is_none() {
         Vec::new()
@@ -141,7 +144,7 @@ pub(super) fn render_agent_panel(
         filter.map(|filter| filter.space.as_str()),
     )
     .into_iter()
-    .filter_map(|pane_id| agent_row(snapshot, &pane_id, config, None))
+    .filter_map(|pane_id| agent_row(snapshot, &pane_id, config, None, now_ms))
     .collect::<Vec<_>>();
     let headers = if filter.is_none()
         && super::agent_groups::grouped_order(config, snapshot.agent_view_label.as_deref())
@@ -166,7 +169,7 @@ pub(super) fn render_agent_panel(
         |row| row.rows.len(),
         |buffer, rect, row, hits| {
             hits.agents.push((rect, row.pane_id.clone()));
-            render_agent_row(buffer, rect, row, config);
+            hits.agent_ages_shown |= render_agent_row(buffer, rect, row, config);
         },
     );
 }
@@ -350,6 +353,7 @@ pub(super) fn agent_row(
     pane_id: &str,
     config: &ClientShellConfig,
     machine: Option<&str>,
+    now_ms: u64,
 ) -> Option<AgentRow> {
     let agent = snapshot
         .agents
@@ -413,18 +417,29 @@ pub(super) fn agent_row(
     Some(AgentRow {
         pane_id: agent.pane_id.clone(),
         workspace_id: agent.workspace_id.clone(),
+        age: crate::agent_state_time::changed_at_ms(
+            agent
+                .tokens
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_str())),
+        )
+        .map(|changed_at| crate::agent_state_time::age_label(changed_at, now_ms)),
         status: agent.agent_status,
         focused: agent.focused,
         rows,
     })
 }
 
+/// Cells an agent's first row keeps for its text before the age is dropped to make room.
+const AGE_MIN_TEXT_WIDTH: u16 = 8;
+
+/// Draws one agent entry and reports whether its age was shown.
 pub(super) fn render_agent_row(
     buffer: &mut Buffer,
     rect: Rect,
     row: &AgentRow,
     config: &ClientShellConfig,
-) {
+) -> bool {
     let palette = &config.palette;
     let row_style = if row.focused {
         Style::default().bg(palette.active_row_bg)
@@ -454,8 +469,16 @@ pub(super) fn render_agent_row(
     } else {
         row.rows.clone()
     };
+    // The age sits at the right edge of the first row, after a one-cell gap.
+    let age = row.age.as_deref().filter(|age| {
+        let reserved = display_width(age) as u16 + 1;
+        rect.height > 0 && rect.width >= 1 + reserved + AGE_MIN_TEXT_WIDTH
+    });
     for (index, tokens) in rows.iter().take(rect.height as usize).enumerate() {
         let indent = if index == 0 { 1 } else { 3 };
+        let reserved = age
+            .filter(|_| index == 0)
+            .map_or(0, |age| display_width(age) as u16 + 1);
         let mut spans = vec![ratatui::text::Span::raw(" ".repeat(indent))];
         spans.extend(crate::ui::resolved_token_spans(
             tokens,
@@ -465,13 +488,25 @@ pub(super) fn render_agent_row(
             secondary,
             secondary,
             palette,
-            rect.width.saturating_sub(indent as u16) as usize,
+            rect.width.saturating_sub(indent as u16 + reserved) as usize,
         ));
         Paragraph::new(Line::from(spans)).style(row_style).render(
             Rect::new(rect.x, rect.y + index as u16, rect.width, 1),
             buffer,
         );
     }
+    if let Some(age) = age {
+        let width = display_width(age) as u16;
+        put_text(
+            buffer,
+            rect.right().saturating_sub(width),
+            rect.y,
+            width,
+            age,
+            secondary,
+        );
+    }
+    age.is_some()
 }
 
 fn put_text(buffer: &mut Buffer, x: u16, y: u16, width: u16, text: &str, style: Style) {

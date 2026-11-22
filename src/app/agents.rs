@@ -390,7 +390,16 @@ impl App {
             agent_status: pane.agent_status,
             screen_detection_skipped: terminal.full_lifecycle_hook_authority_active(),
             state_labels: pane.state_labels,
-            tokens: pane.tokens,
+            tokens: {
+                let mut tokens = pane.tokens;
+                if let Some(changed_at) = terminal.last_agent_state_change_at_ms {
+                    tokens.insert(
+                        crate::agent_state_time::STATE_CHANGED_AT_TOKEN.to_owned(),
+                        changed_at.to_string(),
+                    );
+                }
+                tokens
+            },
             agent_session: pane.agent_session,
             workspace_id: pane.workspace_id,
             tab_id: pane.tab_id,

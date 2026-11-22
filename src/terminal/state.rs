@@ -154,6 +154,8 @@ pub struct TerminalState {
     metadata_token_sequence_sources: std::collections::HashSet<String>,
     pub state: AgentState,
     pub last_agent_state_change_seq: Option<u64>,
+    /// Unix time in milliseconds of the change `last_agent_state_change_seq` numbers.
+    pub last_agent_state_change_at_ms: Option<u64>,
     pub last_agent_completion_seq: Option<u64>,
     pub revision: u64,
     pub launch_argv: Option<Vec<String>>,
@@ -194,6 +196,7 @@ impl TerminalState {
             metadata_token_sequence_sources: std::collections::HashSet::new(),
             state: AgentState::Unknown,
             last_agent_state_change_seq: None,
+            last_agent_state_change_at_ms: None,
             last_agent_completion_seq: None,
             revision: 0,
             launch_argv: None,
@@ -2337,6 +2340,7 @@ impl TerminalState {
         self.stale_full_lifecycle_hook_sessions.clear();
         self.state = AgentState::Unknown;
         self.last_agent_state_change_seq = None;
+        self.last_agent_state_change_at_ms = None;
         self.last_agent_completion_seq = None;
         self.launch_argv = None;
         self.respawn_shell_on_exit = false;

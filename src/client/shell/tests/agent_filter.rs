@@ -466,3 +466,70 @@ fn priority_order_does_not_gather_same_named_spaces() {
 
     assert_eq!(listed_agents(&state), ["pane_2", "pane_3", "pane_1"]);
 }
+
+fn aged_agent(mut agent: ClientShellAgent, minutes_ago: u64) -> ClientShellAgent {
+    // Half a minute into the bucket, so the label is the same wherever the clock ticks.
+    let changed_at = crate::agent_state_time::unix_ms_now() - minutes_ago * 60_000 - 30_000;
+    agent.tokens.push((
+        crate::agent_state_time::STATE_CHANGED_AT_TOKEN.into(),
+        changed_at.to_string(),
+    ));
+    agent
+}
+
+#[test]
+fn agent_row_ends_with_how_long_ago_its_state_changed() {
+    let mut projected = two_space_snapshot();
+    projected.agents[0] = aged_agent(projected.agents[0].clone(), 3 * 60);
+    let mut state = composed(&Config::default(), projected);
+    let frame = state.compose(106, 30).expect("agent sidebar frame");
+    let rows = frame_rows(&frame);
+
+    let aged = agent_rect(&state, "pane_1");
+    let first_line = rows[aged.y as usize]
+        .chars()
+        .skip(aged.x as usize)
+        .take(aged.width as usize)
+        .collect::<String>();
+    assert!(first_line.ends_with(" 3h"), "row: {first_line:?}");
+    assert!(state.hits.agent_ages_shown);
+
+    // An agent whose server reports no change time keeps the whole row for its text.
+    let plain = agent_rect(&state, "pane_2");
+    let plain_line = rows[plain.y as usize]
+        .chars()
+        .skip(plain.x as usize)
+        .take(plain.width as usize)
+        .collect::<String>();
+    assert!(!plain_line.trim_end().ends_with('h'), "row: {plain_line:?}");
+}
+
+#[test]
+fn shown_ages_schedule_a_refresh_and_plain_rows_do_not() {
+    let plain = two_space_state();
+    assert!(!plain.hits.agent_ages_shown);
+    assert_eq!(plain.agent_age_refresh_at, None);
+
+    let mut projected = two_space_snapshot();
+    projected.agents[0] = aged_agent(projected.agents[0].clone(), 5);
+    let mut state = composed(&Config::default(), projected);
+    let deadline = state.agent_age_refresh_at.expect("refresh is scheduled");
+
+    assert!(!state.tick_agent_ages(deadline - std::time::Duration::from_secs(1)));
+    assert!(state.tick_agent_ages(deadline));
+    assert_eq!(state.agent_age_refresh_at, None);
+}
+
+#[test]
+fn narrow_sidebar_drops_the_age_before_the_row_text() {
+    let mut projected = two_space_snapshot();
+    projected.agents[0] = aged_agent(projected.agents[0].clone(), 3 * 60);
+    let mut config = Config::default();
+    config.ui.sidebar_min_width = 10;
+    config.ui.sidebar_width = 10;
+
+    let state = composed(&config, projected);
+
+    assert!(!state.hits.agents.is_empty());
+    assert!(!state.hits.agent_ages_shown);
+}

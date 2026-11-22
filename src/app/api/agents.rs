@@ -887,6 +887,36 @@ mod tests {
     }
 
     #[test]
+    fn agent_info_publishes_the_state_change_time_as_a_reserved_token() {
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        let token = crate::agent_state_time::STATE_CHANGED_AT_TOKEN;
+        assert!(!app.collect_agent_infos()[0].tokens.contains_key(token));
+
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .last_agent_state_change_at_ms = Some(1_700_000_000_000);
+
+        assert_eq!(
+            app.collect_agent_infos()[0]
+                .tokens
+                .get(token)
+                .map(String::as_str),
+            Some("1700000000000")
+        );
+    }
+
+    #[test]
     fn agent_focus_marks_already_focused_done_agent_seen() {
         let mut app = app_with_agent();
         app.state.outer_terminal_focus = Some(false);
