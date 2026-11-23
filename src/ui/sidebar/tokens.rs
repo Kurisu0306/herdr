@@ -521,6 +521,47 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
     }
 
     #[test]
+    fn default_rows_lead_with_the_title_and_spell_out_only_done_or_blocked() {
+        let mut entry = entry();
+        entry.terminal_title_stripped = Some("Fix the flaky test".into());
+        entry.tab = Some("api".into());
+        let config = AgentsSidebarConfig::default();
+        let kinds = |state: &str| {
+            agent_rows(&config, context(&entry), state)
+                .into_iter()
+                .map(|row| row.into_iter().map(|token| token.kind).collect::<Vec<_>>())
+                .collect::<Vec<_>>()
+        };
+
+        for state in ["idle", "working", "unknown"] {
+            assert_eq!(
+                kinds(state),
+                vec![
+                    vec![
+                        ResolvedTokenKind::StateIcon,
+                        ResolvedTokenKind::TerminalTitle("Fix the flaky test".into()),
+                    ],
+                    vec![
+                        ResolvedTokenKind::Agent("pi".into()),
+                        ResolvedTokenKind::Tab("api".into()),
+                    ],
+                ],
+                "{state}"
+            );
+        }
+        for state in ["done", "blocked"] {
+            assert_eq!(
+                kinds(state)[1],
+                vec![
+                    ResolvedTokenKind::Agent("pi".into()),
+                    ResolvedTokenKind::StateText(state.into()),
+                    ResolvedTokenKind::Tab("api".into()),
+                ]
+            );
+        }
+    }
+
+    #[test]
     fn terminal_title_builtins_are_distinct_from_custom_tokens() {
         let mut entry = entry();
         entry.terminal_title = Some("⠋ raw title".into());

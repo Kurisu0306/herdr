@@ -361,14 +361,14 @@ window_title = "{hostname}: {workspace}"
 
 `client.window_title.set` は設定されたタイトルを上書きし、`client.window_title.clear` がそれを戻します。
 
-Agent の状態は、デフォルトではコンパクトな色付きドットで表示されます。blocked、working、done、idle、unknown を色だけでなく形でも区別するには、設定画面で **distinct symbols** を選ぶか、次のように設定します:
+Agent の状態は、デフォルトでは状態ごとに異なる記号で表示され、blocked、working、done、idle、unknown を色だけでなく形でも区別できます。コンパクトな色付きドットにするには、設定画面で **dots** を選ぶか、次のように設定します:
 
 ```toml
 [ui]
-status_indicators = "symbols"
+status_indicators = "dots"
 ```
 
-これらの記号は静的なので、このオプションでスピナーアニメーションが有効になることはありません。
+記号は静的で、どちらのスタイルでもスピナーアニメーションは表示されません。
 
 ### サイドバーの行レイアウト
 
@@ -378,8 +378,8 @@ status_indicators = "symbols"
 [ui.sidebar.agents]
 row_gap = 0
 rows = [
-  ["state_icon", "machine", "workspace", "tab"],
-  ["agent"],
+  ["state_icon", "terminal_title_stripped"],
+  ["agent", { token = "state_text", rules = [{ equals = "idle", hide = true }, { equals = "working", hide = true }, { equals = "unknown", hide = true }] }, "tab"],
 ]
 
 [ui.sidebar.spaces]

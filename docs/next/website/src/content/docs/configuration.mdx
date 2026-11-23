@@ -365,14 +365,14 @@ The title renders on the Herdr server, so `{hostname}` names the machine the pan
 
 `client.window_title.set` overrides the configured title until `client.window_title.clear` hands it back.
 
-Agent status uses compact colored dots by default. To distinguish blocked, working, done, idle, and unknown states by shape as well as color, choose **distinct symbols** in Settings or configure:
+Agent status uses distinct symbols by default, so blocked, working, done, idle, and unknown states differ by shape as well as color. For compact colored dots instead, choose **dots** in Settings or configure:
 
 ```toml
 [ui]
-status_indicators = "symbols"
+status_indicators = "dots"
 ```
 
-The symbols are static, so this option does not enable spinner animation.
+The symbols are static: neither style animates a spinner.
 
 ### Sidebar row layouts
 
@@ -382,8 +382,8 @@ The expanded desktop sidebar renders each inner array in `rows` as one line. The
 [ui.sidebar.agents]
 row_gap = 0
 rows = [
-  ["state_icon", "machine", "workspace", "tab"],
-  ["agent"],
+  ["state_icon", "terminal_title_stripped"],
+  ["agent", { token = "state_text", rules = [{ equals = "idle", hide = true }, { equals = "working", hide = true }, { equals = "unknown", hide = true }] }, "tab"],
 ]
 
 [ui.sidebar.spaces]

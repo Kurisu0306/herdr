@@ -447,14 +447,25 @@ impl AgentsSidebarConfig {
 impl Default for AgentsSidebarConfig {
     fn default() -> Self {
         Self {
+            // The session title leads each entry; the space is named by its group header.
+            // The state is spelled out only when the agent is done or needs attention.
             rows: vec![
                 vec![
                     AgentSidebarToken::StateIcon,
-                    AgentSidebarToken::Machine,
-                    AgentSidebarToken::Workspace,
+                    AgentSidebarToken::TerminalTitleStripped,
+                ],
+                vec![
+                    AgentSidebarToken::Agent,
+                    AgentSidebarToken::Styled {
+                        token: Box::new(AgentSidebarToken::StateText),
+                        style: SidebarTokenStyle::default(),
+                        rules: ["idle", "working", "unknown"]
+                            .into_iter()
+                            .map(SidebarTokenRule::hide_equal)
+                            .collect(),
+                    },
                     AgentSidebarToken::Tab,
                 ],
-                vec![AgentSidebarToken::Agent],
             ],
             rows_by_agent: BTreeMap::new(),
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
@@ -506,20 +517,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_match_the_compact_agent_and_existing_space_layouts() {
+    fn defaults_match_the_title_first_agent_and_existing_space_layouts() {
         let config = SidebarConfig::default();
-        assert_eq!(
-            config.agents.rows,
-            vec![
-                vec![
-                    AgentSidebarToken::StateIcon,
-                    AgentSidebarToken::Machine,
-                    AgentSidebarToken::Workspace,
-                    AgentSidebarToken::Tab,
-                ],
-                vec![AgentSidebarToken::Agent],
-            ]
-        );
+        // The layout the configuration docs list as the default.
+        let documented: AgentsSidebarConfig = toml::from_str(
+            r#"
+rows = [
+  ["state_icon", "terminal_title_stripped"],
+  ["agent", { token = "state_text", rules = [{ equals = "idle", hide = true }, { equals = "working", hide = true }, { equals = "unknown", hide = true }] }, "tab"],
+]
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.agents.rows, documented.rows);
         assert!(config.agents.rows_by_agent.is_empty());
         assert_eq!(config.agents.row_gap, 0);
         assert_eq!(

@@ -361,14 +361,14 @@ window_title = "{hostname}: {workspace}"
 
 `client.window_title.set` 会覆盖配置的标题，直到 `client.window_title.clear` 将其交还。
 
-智能体状态默认使用紧凑的彩色圆点。若要同时通过形状和颜色区分 blocked、working、done、idle 与 unknown 状态，请在设置中选择 **distinct symbols**，或配置：
+智能体状态默认使用各不相同的符号，blocked、working、done、idle 与 unknown 状态可以同时通过形状和颜色区分。若要改用紧凑的彩色圆点，请在设置中选择 **dots**，或配置：
 
 ```toml
 [ui]
-status_indicators = "symbols"
+status_indicators = "dots"
 ```
 
-这些符号是静态的，因此该选项不会启用旋转动画。
+符号是静态的，两种样式都不会显示旋转动画。
 
 ### 侧边栏行布局
 
@@ -378,8 +378,8 @@ status_indicators = "symbols"
 [ui.sidebar.agents]
 row_gap = 0
 rows = [
-  ["state_icon", "machine", "workspace", "tab"],
-  ["agent"],
+  ["state_icon", "terminal_title_stripped"],
+  ["agent", { token = "state_text", rules = [{ equals = "idle", hide = true }, { equals = "working", hide = true }, { equals = "unknown", hide = true }] }, "tab"],
 ]
 
 [ui.sidebar.spaces]

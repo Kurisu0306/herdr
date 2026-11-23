@@ -48,6 +48,18 @@ struct RawRule {
     hide: Option<bool>,
 }
 
+impl SidebarTokenRule {
+    /// Rule that removes a token whose value is exactly `value`.
+    pub(crate) fn hide_equal(value: &str) -> Self {
+        Self {
+            condition: Condition::Equals(value.into()),
+            ignore_case: false,
+            style: SidebarTokenStyle::default(),
+            hide: Some(true),
+        }
+    }
+}
+
 impl TryFrom<RawRule> for SidebarTokenRule {
     type Error = String;
 
