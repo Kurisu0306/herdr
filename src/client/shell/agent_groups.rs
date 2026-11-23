@@ -8,7 +8,7 @@ use super::*;
 
 pub(super) struct AgentGroupHeader {
     pub(super) label: String,
-    /// Space the header names; clicking it narrows the panel to that space.
+    /// Space the header names.
     pub(super) target: AgentPanelFilter,
     /// Present where the space's agents can be folded away.
     pub(super) fold: Option<GroupFold>,

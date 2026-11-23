@@ -294,16 +294,17 @@ fn grouped_list_names_each_space_above_its_agents() {
 }
 
 #[test]
-fn clicking_a_space_header_selects_that_space() {
+fn clicking_a_space_header_keeps_every_space_listed() {
     let mut state = two_space_state();
     let header = header_rect(&state, "second");
 
     let outcome = click(&mut state, header);
 
+    // Only the chips narrow the list; a header is a label.
     assert!(outcome.actions.is_empty() && outcome.requests.is_empty());
-    assert_eq!(listed_agents(&state), ["pane_2"]);
-    // The selected chip names the space now, so the list needs no header.
-    assert!(state.hits.agent_group_headers.is_empty());
+    assert_eq!(state.config.agent_panel_filter, None);
+    assert_eq!(listed_agents(&state), ["pane_1", "pane_2"]);
+    assert_eq!(state.hits.agent_group_headers.len(), 2);
 }
 
 #[test]
@@ -643,7 +644,7 @@ fn folding_a_space_keeps_its_header_and_hides_its_agents() {
     assert_eq!(state.hits.agent_group_headers.len(), 2);
     let frame = state.compose(106, 30).expect("agent sidebar frame");
     assert!(frame_rows(&frame).iter().any(|row| row.contains("1 ▸")));
-    // The fold control did not select the space as its header would.
+    // Folding does not narrow the list to the space.
     assert_eq!(state.config.agent_panel_filter, None);
 
     let fold = fold_rect(&state, "second");
@@ -695,13 +696,15 @@ fn folding_only_hides_agents_where_a_header_can_unfold_them() {
 }
 
 #[test]
-fn clicking_a_folded_header_still_selects_its_space() {
+fn clicking_a_folded_header_leaves_it_folded() {
     let mut state = folded("second");
+    // The click lands on the header's first cell, away from the fold control at its right edge.
     let header = header_rect(&state, "second");
 
     click(&mut state, header);
 
-    assert_eq!(listed_agents(&state), ["pane_2"]);
+    assert_eq!(state.config.agent_panel_filter, None);
+    assert_eq!(listed_agents(&state), ["pane_1"]);
 }
 
 #[test]

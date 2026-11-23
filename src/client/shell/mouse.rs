@@ -2042,14 +2042,7 @@ impl ClientShellState {
                     .agent_filter_chips
                     .iter()
                     .find(|(rect, _)| super::contains(*rect, point))
-                    .map(|(_, target)| target.clone())
-                    .or_else(|| {
-                        self.hits
-                            .agent_group_headers
-                            .iter()
-                            .find(|(rect, _)| super::contains(*rect, point))
-                            .map(|(_, target)| Some(target.clone()))
-                    });
+                    .map(|(_, target)| target.clone());
                 if let Some(target) = space_choice {
                     // Clicking the selected space again returns to every space.
                     let filter = target
@@ -2059,6 +2052,16 @@ impl ClientShellState {
                         self.agent_scroll = 0;
                         outcome.repaint = true;
                     }
+                    return;
+                }
+                // A header only names its space. Narrowing the list is left to the chips, so a
+                // click that misses the fold control changes nothing.
+                if self
+                    .hits
+                    .agent_group_headers
+                    .iter()
+                    .any(|(rect, _)| super::contains(*rect, point))
+                {
                     return;
                 }
                 if super::contains(self.hits.agent_sort_toggle, point) {
