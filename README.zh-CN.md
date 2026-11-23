@@ -38,6 +38,13 @@
 - **agent 图标** — 行标记 `agent_icon` 用符号标明这一行是哪个 agent。
 - **可选的树形布局** — `ui.sidebar.layout = "tree"` 让每个工作区只出现一次，agent 列在它下面。
 
+下面[安装](#安装)一节的命令安装的是官方 Herdr，不是这个 fork。这个 fork 在 [releases](https://github.com/Kurisu0306/herdr/releases) 页面提供 Apple 芯片 macOS 的二进制；其他平台需要用 Rust 1.96.1 和 Zig 0.16.0 从源码编译。
+
+```bash
+curl -fsSL -o ~/.local/bin/herdr https://github.com/Kurisu0306/herdr/releases/latest/download/herdr-macos-aarch64
+chmod +x ~/.local/bin/herdr
+```
+
 图片由演示会话的终端输出渲染而成。详细说明见[暂存的配置文档](docs/next/website/src/content/docs/zh-cn/configuration.mdx)。
 
 ---

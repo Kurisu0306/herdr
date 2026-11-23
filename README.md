@@ -39,6 +39,13 @@ an unofficial personal fork of [herdrdev/herdr](https://github.com/herdrdev/herd
 - **agent icons** — the `agent_icon` row token marks which agent a row belongs to.
 - **optional tree layout** — `ui.sidebar.layout = "tree"` lists every space once with its agents beneath it.
 
+the commands under [install](#install) install the official Herdr, not this fork. this fork publishes an Apple silicon macOS binary on its [releases](https://github.com/Kurisu0306/herdr/releases) page; other platforms build from source with Rust 1.96.1 and Zig 0.16.0.
+
+```bash
+curl -fsSL -o ~/.local/bin/herdr https://github.com/Kurisu0306/herdr/releases/latest/download/herdr-macos-aarch64
+chmod +x ~/.local/bin/herdr
+```
+
 the image is rendered from the terminal output of a demo session. details are in the [staged configuration docs](docs/next/website/src/content/docs/configuration.mdx).
 
 ---
