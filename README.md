@@ -48,6 +48,8 @@ curl -fsSL -o ~/.local/bin/herdr "https://github.com/Kurisu0306/herdr/releases/l
 chmod +x ~/.local/bin/herdr
 ```
 
+releases are tagged `fork-<upstream version>-<n>`, and `herdr --version` reports the tag in parentheses. `scripts/fork.sh` builds the fork, keeps installed releases side by side so you can switch back, and publishes a release.
+
 the image is rendered from the terminal output of a demo session. details are in the [staged configuration docs](docs/next/website/src/content/docs/configuration.mdx).
 
 ---

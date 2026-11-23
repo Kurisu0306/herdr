@@ -47,6 +47,8 @@ curl -fsSL -o ~/.local/bin/herdr "https://github.com/Kurisu0306/herdr/releases/l
 chmod +x ~/.local/bin/herdr
 ```
 
+发布版本的标签格式为 `fork-<上游版本>-<序号>`，`herdr --version` 会在括号里显示这个标签。`scripts/fork.sh` 用于编译这个 fork、把各个已安装的版本并排保存以便切换回退，以及发布新版本。
+
 图片由演示会话的终端输出渲染而成。详细说明见[暂存的配置文档](docs/next/website/src/content/docs/zh-cn/configuration.mdx)。
 
 ---
