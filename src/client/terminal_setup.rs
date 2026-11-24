@@ -59,7 +59,7 @@ pub(super) fn setup_terminal_with_capabilities(
         #[cfg(windows)]
         restore_windows_input_mode: Arc::new(WindowsInputModeRestore::default()),
     };
-    crate::terminal_modes::clear_host_mouse_reporting(&mut io::stdout())?;
+    crate::terminal_modes::clear_host_mouse_reporting(&mut crate::terminal_output::stdout())?;
     let host_color_scheme_reports =
         should_enable_host_color_scheme_reports(enable_client_protocols);
     #[cfg(windows)]
@@ -79,19 +79,23 @@ pub(super) fn setup_terminal_with_capabilities(
         push_keyboard_enhancement_flags()?;
         let (probe, buffered_input) = query_host_capabilities(true);
         set_mouse_capture(mouse_capture, false)?;
-        execute!(io::stdout(), EnableBracketedPaste, EnableFocusChange)?;
+        execute!(
+            crate::terminal_output::stdout(),
+            EnableBracketedPaste,
+            EnableFocusChange
+        )?;
         if host_color_scheme_reports {
             terminal_guard.reset_host_color_scheme_reports = true;
-            write_host_color_scheme_report_mode(&mut io::stdout(), true)?;
+            write_host_color_scheme_report_mode(&mut crate::terminal_output::stdout(), true)?;
         }
         (probe, buffered_input)
     } else {
         if should_enable_host_color_scheme_reports(true) {
-            write_host_color_scheme_report_mode(&mut io::stdout(), false)?;
+            write_host_color_scheme_report_mode(&mut crate::terminal_output::stdout(), false)?;
         }
         let (probe, buffered_input) = query_host_capabilities(false);
         set_mouse_capture(mouse_capture, false)?;
-        execute!(io::stdout(), EnableBracketedPaste)?;
+        execute!(crate::terminal_output::stdout(), EnableBracketedPaste)?;
         (probe, buffered_input)
     };
 
@@ -117,11 +121,11 @@ pub(super) fn setup_terminal_with_capabilities(
     if let Some(mode) = modify_other_keys_mode {
         terminal_guard.reset_modify_other_keys = true;
         terminal_guard.modify_other_keys_sequence = Some(mode.set_sequence());
-        io::stdout().write_all(mode.set_sequence())?;
-        io::stdout().flush()?;
+        crate::terminal_output::stdout().write_all(mode.set_sequence())?;
+        crate::terminal_output::stdout().flush()?;
     }
 
-    execute!(io::stdout(), DisableLineWrap)?;
+    execute!(crate::terminal_output::stdout(), DisableLineWrap)?;
 
     terminal_guard.host_escape_disambiguation_active = host_probe.escape_disambiguation;
     terminal_guard.host_sgr_pixel_mouse = host_probe.sgr_pixel_mouse;
@@ -153,6 +157,8 @@ pub(super) struct TerminalGuard {
 const HOST_CAPABILITY_QUERY_TIMEOUT: Duration = Duration::from_millis(250);
 #[cfg(not(windows))]
 const MAX_BUFFERED_HOST_INPUT: usize = 64 * 1024;
+/// How long terminal restore waits for queued client output before giving up on the host.
+const RESTORE_OUTPUT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 #[cfg(not(windows))]
 #[derive(Default)]
@@ -181,9 +187,9 @@ fn query_host_capabilities(query_keyboard: bool) -> (HostTerminalProbe, Vec<u8>)
     } else {
         PIXEL_MOUSE_QUERY
     };
-    if let Err(err) = io::stdout()
+    if let Err(err) = crate::terminal_output::stdout()
         .write_all(query)
-        .and_then(|()| io::stdout().flush())
+        .and_then(|()| crate::terminal_output::stdout().flush())
     {
         tracing::debug!(%err, "host capability query unavailable");
         return (HostTerminalProbe::default(), buffered_input);
@@ -633,17 +639,17 @@ pub(super) fn set_mouse_capture(enabled: bool, sgr_pixels: bool) -> io::Result<(
         }
     });
     #[cfg(not(windows))]
-    crate::terminal_modes::clear_host_mouse_reporting(&mut io::stdout())?;
+    crate::terminal_modes::clear_host_mouse_reporting(&mut crate::terminal_output::stdout())?;
     #[cfg(not(windows))]
     if enabled {
-        execute!(io::stdout(), EnableMouseCapture)?;
+        execute!(crate::terminal_output::stdout(), EnableMouseCapture)?;
         if sgr_pixels {
-            io::stdout().write_all(b"\x1b[?1016h")?;
-            io::stdout().flush()?;
+            crate::terminal_output::stdout().write_all(b"\x1b[?1016h")?;
+            crate::terminal_output::stdout().flush()?;
         }
         Ok(())
     } else {
-        match execute!(io::stdout(), DisableMouseCapture) {
+        match execute!(crate::terminal_output::stdout(), DisableMouseCapture) {
             Ok(()) => Ok(()),
             Err(err) => Err(err),
         }
@@ -686,6 +692,16 @@ fn restore_terminal_state(
     reset_host_color_scheme_reports: bool,
     #[cfg(windows)] restore_windows_input_mode: Option<u32>,
 ) -> io::Result<()> {
+    // Queued output goes first. A host that stopped reading would block every restore write,
+    // so leave raw mode and skip them instead of hanging on exit.
+    if !crate::terminal_output::finish(RESTORE_OUTPUT_TIMEOUT) {
+        tracing::warn!("terminal is not taking output; skipping terminal restore sequences");
+        let _ = crossterm::terminal::disable_raw_mode();
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "terminal is not taking output",
+        ));
+    }
     let _ = clear_received_kitty_graphics(&mut io::stdout());
 
     // Reset modifyOtherKeys if we enabled it.

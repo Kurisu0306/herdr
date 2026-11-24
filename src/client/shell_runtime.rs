@@ -109,8 +109,11 @@ pub(super) fn sync_client_shell_keyboard_report_all(
     if desired == state.keyboard_report_all_active {
         return Ok(());
     }
-    crate::terminal_modes::set_host_kitty_keyboard_report_all(&mut io::stdout(), desired)
-        .map_err(ClientError::ConnectionFailed)?;
+    crate::terminal_modes::set_host_kitty_keyboard_report_all(
+        &mut crate::terminal_output::stdout(),
+        desired,
+    )
+    .map_err(ClientError::ConnectionFailed)?;
     state.keyboard_report_all_active = desired;
     if let Some(shell) = state.shell.as_mut() {
         shell.set_host_reports_all_keys(desired);
@@ -143,7 +146,8 @@ pub(super) fn clear_endpoint_host_effects(
 
     state.pane_keyboard_report_all = false;
     let _ = sync_client_shell_keyboard_report_all(state);
-    let _ = crate::terminal_effects::write_window_title(&mut std::io::stdout(), None);
+    let _ =
+        crate::terminal_effects::write_window_title(&mut crate::terminal_output::stdout(), None);
 }
 
 pub(super) fn apply_client_shell_input_source_changes(

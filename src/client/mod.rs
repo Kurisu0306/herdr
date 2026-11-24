@@ -91,7 +91,7 @@ fn refresh_host_keyboard_protocol(
     focus_reporting: bool,
 ) {
     if let Err(err) = terminal_guard.refresh_host_keyboard_protocol(
-        &mut io::stdout(),
+        &mut crate::terminal_output::stdout(),
         report_all_keys,
         focus_reporting,
     ) {
@@ -184,7 +184,7 @@ fn run_client_with_mode(
     // client initializes the terminal, so defer the host mouse reset to
     // `setup_terminal_with_capabilities` instead of emitting raw escapes early.
     #[cfg(not(windows))]
-    crate::terminal_modes::clear_host_mouse_reporting(&mut io::stdout())?;
+    crate::terminal_modes::clear_host_mouse_reporting(&mut crate::terminal_output::stdout())?;
     let client_rendered_shell = attach_request.is_none();
     let socket_path = client_socket_path();
     let keybinding_source = client_shell_keybinding_source();
@@ -358,6 +358,9 @@ fn run_client_with_mode(
     }
 
     let result = rt.block_on(async {
+        // From here on, terminal writes go through a writer thread so a host that stops reading
+        // cannot stall input handling. Terminal restore drains and stops it.
+        crate::terminal_output::start();
         run_client_loop(
             initial,
             endpoint_catalog,
@@ -488,6 +491,7 @@ async fn run_client_loop(
         redraw_on_focus_gained: config.redraw_on_focus_gained,
         repaint_pending: false,
         presentation_frozen: false,
+        deferred_frame: None,
         deferred_local_activation: None,
         draw_host_cursor,
         detached_process_children: Vec::new(),
@@ -822,6 +826,7 @@ async fn run_client_loop(
                 },
                 ev = event_rx.recv() => ev.unwrap_or(ClientLoopEvent::Timer),
                 ev = supervisor_rx.recv() => ev.map(ClientLoopEvent::EndpointSupervisor).unwrap_or(ClientLoopEvent::Timer),
+                _ = crate::terminal_output::drained(), if state.deferred_frame.is_some() => ClientLoopEvent::TerminalOutputDrained,
             }
         };
         #[cfg(unix)]
@@ -834,6 +839,7 @@ async fn run_client_loop(
                 _ = tokio::time::sleep_until(timer_deadline.into()) => ClientLoopEvent::Timer,
                 ev = supervisor_rx.recv() => ev.map(ClientLoopEvent::EndpointSupervisor).unwrap_or(ClientLoopEvent::Timer),
                 ev = event_rx.recv() => ev.unwrap_or(ClientLoopEvent::Timer),
+                _ = crate::terminal_output::drained(), if state.deferred_frame.is_some() => ClientLoopEvent::TerminalOutputDrained,
             }
         };
         let now = std::time::Instant::now();
@@ -842,6 +848,7 @@ async fn run_client_loop(
         }
 
         match event {
+            ClientLoopEvent::TerminalOutputDrained => state.present_deferred_frame(),
             ClientLoopEvent::HostPower(event) => {
                 if supervisors.host_power_event(event, now) {
                     write_stream.resume_health(now);
@@ -1628,22 +1635,23 @@ async fn run_client_loop(
                         {
                             record_received_kitty_graphics(&frame.bytes);
                         }
-                        let mut stdout = io::stdout();
+                        let mut stdout = crate::terminal_output::stdout();
                         let _ = stdout.write_all(&frame.bytes);
                         let _ = stdout.flush();
                     }
                     ServerMessage::Graphics { bytes } => {
                         if state.kitty_graphics_enabled {
                             record_received_kitty_graphics(&bytes);
-                            let mut stdout = io::stdout();
+                            let mut stdout = crate::terminal_output::stdout();
                             let _ = stdout.write_all(&bytes);
                             let _ = stdout.flush();
                         }
                     }
                     ServerMessage::TerminalBell { count } => {
-                        if let Err(err) =
-                            crate::terminal_effects::write_terminal_bells(&mut io::stdout(), count)
-                        {
+                        if let Err(err) = crate::terminal_effects::write_terminal_bells(
+                            &mut crate::terminal_output::stdout(),
+                            count,
+                        ) {
                             warn!(err = %err, "failed to emit terminal bell");
                         }
                     }
@@ -1736,7 +1744,7 @@ async fn run_client_loop(
                                     &control,
                                     &path,
                                 );
-                                let mut stdout = io::stdout();
+                                let mut stdout = crate::terminal_output::stdout();
                                 let written = state
                                     .flush_native_cleanup(&mut stdout)
                                     .and_then(|()| stdout.write_all(&command))
@@ -2019,11 +2027,11 @@ async fn run_client_loop(
                                 state.present_frame(frame);
                             }
                         }
-                        let _ = io::stdout().flush();
+                        let _ = crate::terminal_output::stdout().flush();
                     }
                     ServerMessage::WindowTitle { title } => {
                         let _ = crate::terminal_effects::write_window_title(
-                            &mut io::stdout(),
+                            &mut crate::terminal_output::stdout(),
                             title.as_deref(),
                         );
                     }
@@ -2076,7 +2084,7 @@ async fn run_client_loop(
                     } => {
                         if state.attach_escape.is_some() {
                             crate::terminal_modes::set_direct_host_keyboard_protocol(
-                                &mut io::stdout(),
+                                &mut crate::terminal_output::stdout(),
                                 &mut state.direct_keyboard_protocol,
                                 flags,
                                 modify_other_keys_level,
@@ -2383,7 +2391,7 @@ async fn run_client_loop(
     // Clean exit (Ctrl+C). Send Detach before closing.
     let detach = ClientMessage::Detach;
     let _ = write_to_server(&mut write_stream, &detach);
-    let _ = io::stdout().flush();
+    let _ = crate::terminal_output::stdout().flush();
 
     Ok(())
 }

@@ -58,6 +58,7 @@ mod terminal;
 mod terminal_effects;
 mod terminal_modes;
 mod terminal_notify;
+mod terminal_output;
 mod terminal_theme;
 mod thread_spawn;
 mod ui;

@@ -75,6 +75,9 @@ pub(super) struct ClientState {
     /// During a source-off-first handoff the currently blitted frame remains authoritative until
     /// an acknowledged target snapshot/surface pair commits.
     pub(super) presentation_frozen: bool,
+    /// Latest frame skipped because earlier output had not reached the terminal yet; presented
+    /// when the output queue drains.
+    pub(super) deferred_frame: Option<frame_output::ComposedFrame>,
     /// Latest explicit Local selection awaiting this client's replacement Local connection.
     pub(super) deferred_local_activation: Option<endpoint::EndpointActivationIntent>,
     pub(super) draw_host_cursor: bool,
@@ -86,7 +89,7 @@ impl Drop for ClientState {
     fn drop(&mut self) {
         if self.attach_escape.is_some() {
             let _ = crate::terminal_modes::set_direct_host_keyboard_protocol(
-                &mut io::stdout(),
+                &mut crate::terminal_output::stdout(),
                 &mut self.direct_keyboard_protocol,
                 0,
                 0,
@@ -137,6 +140,7 @@ impl ClientState {
             redraw_on_focus_gained: false,
             repaint_pending: false,
             presentation_frozen: false,
+            deferred_frame: None,
             deferred_local_activation: None,
             draw_host_cursor: false,
             detached_process_children: Vec::new(),
@@ -317,7 +321,7 @@ impl ClientState {
         if self.presentation_frozen || graphics.is_empty() || !self.kitty_graphics_enabled {
             return;
         }
-        let mut stdout = io::stdout();
+        let mut stdout = crate::terminal_output::stdout();
         let _ = write_encoded_frame_with_graphics(&mut stdout, &[], graphics);
         let _ = stdout.flush();
     }
@@ -329,6 +333,10 @@ impl ClientState {
         if self.presentation_frozen
             || self.repaint_pending
             || (self.kitty_graphics_enabled && !self.pending_native_cleanup.is_empty())
+            // A skipped frame is older than this patch, and a patch cannot be replaced by a later
+            // one while the terminal is not taking output. A composed frame can wait for both.
+            || self.deferred_frame.is_some()
+            || crate::terminal_output::defer_until_drained()
         {
             crate::render_prof::event("client_surface_patch.fallback.repaint");
             return Ok(false);
@@ -356,7 +364,7 @@ impl ClientState {
         crate::render_prof::duration_since("client_surface_patch.encode", encode_started);
         let write_started = crate::render_prof::timer();
         if !encoded.bytes.is_empty() {
-            let mut stdout = io::stdout();
+            let mut stdout = crate::terminal_output::stdout();
             stdout.write_all(&encoded.bytes)?;
             stdout.flush()?;
         }
@@ -509,7 +517,29 @@ impl ClientState {
     }
 
     pub(super) fn present_frame(&mut self, frame_data: impl Into<frame_output::ComposedFrame>) {
-        let _ = self.try_present_frame(frame_data);
+        let frame = frame_data.into();
+        if self.frame_can_wait(&frame) && crate::terminal_output::defer_until_drained() {
+            // The terminal has not taken the previous output yet. Keep only the latest frame;
+            // the encoder diffs it against the last frame that was actually written.
+            self.deferred_frame = Some(frame);
+            return;
+        }
+        let _ = self.try_present_frame(frame);
+    }
+
+    /// Presents the frame skipped while output was pending, once the output queue drains.
+    pub(super) fn present_deferred_frame(&mut self) {
+        if let Some(frame) = self.deferred_frame.take() {
+            self.present_frame(frame);
+        }
+    }
+
+    /// Frames carrying graphics operations are written in order rather than replaced, since a
+    /// later frame does not repeat an earlier frame's uploads or deletions.
+    fn frame_can_wait(&self, frame: &frame_output::ComposedFrame) -> bool {
+        !self.presentation_frozen
+            && (!self.kitty_graphics_enabled
+                || (frame.graphics.is_empty() && self.pending_native_cleanup.is_empty()))
     }
 
     fn write_composed_output(
@@ -550,7 +580,14 @@ impl ClientState {
         &mut self,
         frame_data: impl Into<frame_output::ComposedFrame>,
     ) -> bool {
-        self.try_present_frame_to(&mut io::stdout(), frame_data)
+        // This frame is newer than any frame skipped earlier.
+        self.deferred_frame = None;
+        if crate::terminal_output::take_write_failed() {
+            // Some queued output never reached the terminal, so the encoder's last frame is not
+            // what the terminal shows.
+            self.repaint_pending = true;
+        }
+        self.try_present_frame_to(&mut crate::terminal_output::stdout(), frame_data)
     }
 
     pub(super) fn try_present_frame_to(

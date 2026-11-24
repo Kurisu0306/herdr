@@ -33,5 +33,7 @@ pub(super) enum ClientLoopEvent {
         /// latest target have the same identity after restoration.
         force: bool,
     },
+    /// Output that was pending when a frame was skipped has reached the terminal.
+    TerminalOutputDrained,
     Timer,
 }

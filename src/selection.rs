@@ -382,7 +382,7 @@ fn write_osc52_bytes_with_match(
         true
     } else {
         let sequence = osc52_sequence(bytes);
-        let mut stdout = std::io::stdout();
+        let mut stdout = crate::terminal_output::stdout();
         stdout.write_all(sequence.as_bytes()).is_ok() && stdout.flush().is_ok()
     }
 }
