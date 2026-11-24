@@ -852,6 +852,18 @@ pub fn process_exists(pid: u32) -> bool {
     }
 }
 
+/// Whether `pid` is still running. Unlike `process_exists`, an exited process that
+/// has not been reaped yet counts as gone: a zombie accepts `kill(pid, 0)`, and when
+/// its parent never waits for it (a container whose init does not reap orphans) it
+/// stays that way for good.
+pub fn process_running(pid: u32) -> bool {
+    process_exists(pid) && !process_job_stat(pid).is_some_and(|stat| process_has_exited(stat.state))
+}
+
+fn process_has_exited(state: char) -> bool {
+    matches!(state, 'Z' | 'X' | 'x')
+}
+
 pub fn write_clipboard(bytes: &[u8]) -> bool {
     let deadline = std::time::Instant::now() + clipboard::TIMEOUT;
     for command in clipboard_commands() {
@@ -1177,6 +1189,33 @@ mod tests {
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[test]
+    fn an_unreaped_zombie_does_not_count_as_a_running_process() {
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("true should start");
+        let pid = child.id();
+        // Until it is waited for, the exited child stays a zombie.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while process_job_stat(pid).map(|stat| stat.state) != Some('Z') {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "child should become a zombie"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+
+        assert_eq!(
+            unsafe { libc::kill(pid as i32, 0) },
+            0,
+            "a zombie still accepts signal 0"
+        );
+        assert!(process_exists(pid), "the zombie's pid is still taken");
+        assert!(!process_running(pid));
+        assert!(process_running(std::process::id()));
+        child.wait().expect("zombie should be reaped");
     }
 
     #[test]

@@ -246,6 +246,11 @@ pub fn process_exists(_pid: u32) -> bool {
 }
 
 /// Unsupported platform stub.
+pub fn process_running(_pid: u32) -> bool {
+    false
+}
+
+/// Unsupported platform stub.
 pub fn write_clipboard(_bytes: &[u8]) -> bool {
     false
 }

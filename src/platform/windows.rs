@@ -2816,6 +2816,11 @@ pub fn process_exists(pid: u32) -> bool {
     ok && exit_code == STILL_ACTIVE
 }
 
+/// Whether `pid` is still running. `process_exists` already checks the exit code.
+pub fn process_running(pid: u32) -> bool {
+    process_exists(pid)
+}
+
 static LAST_CLIPBOARD_WRITE_SEQUENCE: AtomicU32 = AtomicU32::new(0);
 
 pub fn write_clipboard(bytes: &[u8]) -> bool {

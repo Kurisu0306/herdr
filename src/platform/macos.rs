@@ -1206,6 +1206,11 @@ pub fn process_exists(pid: u32) -> bool {
     }
 }
 
+/// Whether `pid` is still running. macOS keeps the signal-based check of `process_exists`.
+pub fn process_running(pid: u32) -> bool {
+    process_exists(pid)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

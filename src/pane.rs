@@ -1745,7 +1745,7 @@ fn wait_for_processes_to_exit(
                 *pid,
                 child_pid,
                 child_wait_completed,
-                crate::platform::process_exists,
+                crate::platform::process_running,
             )
         }) {
             return true;
